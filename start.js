@@ -9,6 +9,8 @@ module.exports = {
         env: {
           PYTHONUTF8: "1",
           PYTHONUNBUFFERED: "1",
+          NO_COLOR: "1",
+          TERM: "dumb",
           POTIONUI_STORAGE_PATH: "{{path.resolve(cwd, 'data', 'storage')}}",
           POTIONUI_DB_PATH: "{{path.resolve(cwd, 'data', 'storage', 'db.sqlite')}}",
           POTIONUI_MODELS_DIR: "{{path.resolve(cwd, 'data', 'models')}}"

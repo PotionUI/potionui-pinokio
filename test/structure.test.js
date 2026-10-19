@@ -63,6 +63,12 @@ test("start.js URL regex matches PotionUI's real startup line", () => {
   }
 })
 
+test("start.js turns off terminal colour and styling so the URL stays contiguous", () => {
+  const env = load("start.js").run[0].params.env
+  assert.equal(env.NO_COLOR, "1")
+  assert.equal(env.TERM, "dumb")
+})
+
 test("start.js takes a free port from Pinokio instead of hard-coding one", () => {
   const text = flatten(load("start.js"))
   assert.ok(text.includes("--port {{port}}"))
