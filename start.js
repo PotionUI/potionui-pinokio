@@ -16,6 +16,13 @@ module.exports = async (kernel) => {
         }
       },
       {
+        method: "fs.write",
+        params: {
+          path: "data/run.json",
+          json2: { port: PORT, url: `http://127.0.0.1:${PORT}` }
+        }
+      },
+      {
         method: "local.set",
         params: {
           url: `http://127.0.0.1:${PORT}`

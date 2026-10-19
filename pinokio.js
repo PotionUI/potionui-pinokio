@@ -1,3 +1,15 @@
+const fs = require("fs")
+const path = require("path")
+
+const readRunUrl = () => {
+  try {
+    const run = JSON.parse(fs.readFileSync(path.resolve(__dirname, "data", "run.json"), "utf8"))
+    return typeof run.url === "string" && /^http:\/\/127\.0\.0\.1:\d+$/.test(run.url) ? run.url : null
+  } catch (e) {
+    return null
+  }
+}
+
 module.exports = {
   version: "7.0",
   title: "PotionUI",
@@ -25,9 +37,10 @@ module.exports = {
     }
     if (running.start) {
       const local = info.local("start.js")
-      if (local && local.url) {
+      const url = (local && local.url) || readRunUrl()
+      if (url) {
         return [
-          { default: true, icon: "fa-solid fa-rocket", text: "Open Web UI", href: local.url },
+          { default: true, icon: "fa-solid fa-rocket", text: "Open Web UI", href: url },
           { icon: "fa-solid fa-terminal", text: "Terminal", href: "start.js" }
         ]
       }

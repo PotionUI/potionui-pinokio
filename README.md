@@ -8,7 +8,7 @@ A [Pinokio](https://pinokio.computer) launcher for [PotionUI](https://github.com
 | --- | --- | --- |
 | Install | `install.js` | Clones PotionUI into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env`, installs the backend with `uv`, installs ffmpeg through conda and builds the frontend |
 | Start | `start.js` | Takes a free port from `kernel.port()`, stores `http://127.0.0.1:<port>` as the `url` local variable, then runs PotionUI's backend with uvicorn on that port. The backend serves the built UI itself, so there is one process |
-| Open Web UI / Terminal | | Shown while running. The URL is set before launch, as in Pinokio's `open-webui` example, so it does not depend on matching the console output. It can appear a few seconds before the app finishes starting |
+| Open Web UI / Terminal | | Shown while running. The URL is set before launch, as in Pinokio's `open-webui` example, so it does not depend on matching the console output. It can appear a few seconds before the app finishes starting. `start.js` also writes `data/run.json` (`port`, `url`) and the menu reads it as a fallback when Pinokio's local memory has no url; the file is ignored unless `start.js` is running |
 | Update | `update.js` | `git pull` in `app/`, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
 | Reset | `reset.js` | Deletes `app/env`, `app/frontend/node_modules` and `app/frontend/build` |
 
@@ -46,6 +46,10 @@ Open the Web UI and create the owner account. From the same machine no claim cod
 1. Publish this folder as a git repository.
 2. In Pinokio, open Discover, click "Download from URL" and enter the repository URL.
 3. Click Install, then Start.
+
+## Install as a real folder
+
+Install the launcher as a real folder under `PINOKIO_HOME/api` (Download from URL, or `git clone` into `PINOKIO_HOME/api/potionui`), not as a symlink. Pinokio keys script memory such as `local.url` by path, and a symlinked folder can make the native `info.local` lookup miss. The `data/run.json` fallback covers that case, but a real folder is the supported layout.
 
 ## Publishing
 
