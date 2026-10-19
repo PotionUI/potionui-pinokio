@@ -4,10 +4,17 @@ module.exports = {
   },
   run: [
     {
-      when: "{{!exists('app/.git')}}",
+      when: "{{exists('app') && !(exists('app/api.py') && exists('app/requirements.txt'))}}",
+      method: "fs.rm",
+      params: {
+        path: "app"
+      }
+    },
+    {
+      when: "{{!(exists('app/api.py') && exists('app/requirements.txt'))}}",
       method: "shell.run",
       params: {
-        message: "git clone https://github.com/PotionUI/PotionUI.git app"
+        message: "git clone --depth 1 https://github.com/PotionUI/PotionUI.git app"
       }
     },
     {

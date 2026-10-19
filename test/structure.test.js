@@ -90,8 +90,10 @@ test("reset.js removes only the environment and frontend artefacts", () => {
   assert.ok(!/data|storage|models/.test(flatten(removals)))
 })
 
-test("no script outside reset.js deletes files", () => {
-  for (const name of ["install.js", "start.js", "update.js"]) {
+test("install.js removes only app and nothing else deletes files", () => {
+  const removed = load("install.js").run.filter((step) => step.method === "fs.rm").map((step) => step.params.path)
+  assert.deepEqual(removed, ["app"])
+  for (const name of ["start.js", "update.js"]) {
     assert.ok(!/fs\.rm|rm -rf|rmdir|del /.test(flatten(load(name))), name)
   }
 })
@@ -124,10 +126,40 @@ test("install.js branches pip installs on gpu and platform", () => {
   assert.ok(!cpu.params.message.includes("constraints.txt"))
 })
 
-test("install.js clones into app only when app/.git is missing, then builds the frontend", () => {
+const evaluateWhen = (step, existing) => {
+  if (!step.when) return true
+  const expression = step.when.match(/^\{\{([\s\S]*)\}\}$/)[1]
+  const exists = (relative) => existing.includes(relative)
+  return Boolean(new Function("exists", "gpu", "platform", `return (${expression})`)(exists, "nvidia", "linux"))
+}
+
+const plannedFor = (existing) => {
+  const steps = load("install.js").run.filter((step) => {
+    const text = flatten(step.params)
+    return (step.method === "fs.rm" || text.includes("git clone")) && evaluateWhen(step, existing)
+  })
+  return steps.map((step) => (step.method === "fs.rm" ? `rm ${step.params.path}` : "clone"))
+}
+
+test("install.js heals a partial clone: no api.py means remove app and clone again", () => {
+  assert.deepEqual(plannedFor(["app", "app/.git", "app/env"]), ["rm app", "clone"])
+  assert.deepEqual(plannedFor(["app", "app/api.py"]), ["rm app", "clone"])
+  assert.deepEqual(plannedFor(["app", "app/requirements.txt"]), ["rm app", "clone"])
+})
+
+test("install.js clones into the empty app folder Pinokio creates", () => {
+  assert.deepEqual(plannedFor(["app"]), ["rm app", "clone"])
+  assert.deepEqual(plannedFor([]), ["clone"])
+})
+
+test("install.js leaves a complete app alone", () => {
+  assert.deepEqual(plannedFor(["app", "app/.git", "app/api.py", "app/requirements.txt", "app/env"]), [])
+})
+
+test("install.js clones shallow into app and builds the frontend", () => {
   const steps = load("install.js").run
-  assert.equal(steps[0].when, "{{!exists('app/.git')}}")
-  assert.equal(steps[0].params.message, "git clone https://github.com/PotionUI/PotionUI.git app")
+  const clone = steps.find((step) => flatten(step.params).includes("git clone"))
+  assert.equal(clone.params.message, "git clone --depth 1 https://github.com/PotionUI/PotionUI.git app")
   const build = steps.find((step) => step.params && step.params.path === "app/frontend")
   assert.deepEqual(build.params.message, ["npm install", "npm run build"])
 })
