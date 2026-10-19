@@ -59,10 +59,20 @@ test("start.js does not depend on the console regex for the url", async () => {
   assert.ok(!flatten(run[remember]).includes("input.event"))
 })
 
-test("start.js readiness event is an optional extra that keeps the shell alive", async () => {
+test("start.js readiness event is the generic upstream URL pattern and keeps the shell alive", async () => {
   const [handler] = (await launchStep()).params.on
   assert.strictEqual(handler.done, true)
+  assert.equal(handler.event, "/http:\\/\\/[0-9.:]+/")
   assert.ok(parseEvent(handler.event).test("Uvicorn running on http://127.0.0.1:42003 (Press CTRL+C to quit)"))
+})
+
+test("start.js ignores error: and errno lines like the ComfyUI launcher, so Pinokio's default break handlers cannot close the readiness event", async () => {
+  const handlers = (await launchStep()).params.on
+  for (const event of ["/error:/i", "/errno/i"]) {
+    const handler = handlers.find((item) => item.event === event)
+    assert.ok(handler, event)
+    assert.strictEqual(handler.break, false)
+  }
 })
 
 test("start.js keeps storage, database and models outside the app checkout", async () => {

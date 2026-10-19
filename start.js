@@ -34,7 +34,11 @@ module.exports = async (kernel) => {
             POTIONUI_MODELS_DIR: "{{path.resolve(cwd, 'data', 'models')}}"
           },
           message: `python -m uvicorn api:app --host 127.0.0.1 --port ${PORT} --limit-concurrency 1000 --timeout-keep-alive 30 --timeout-graceful-shutdown 30`,
-          on: [{ event: "/Uvicorn running on/i", done: true }]
+          on: [
+            { event: "/http:\\/\\/[0-9.:]+/", done: true },
+            { event: "/errno/i", break: false },
+            { event: "/error:/i", break: false }
+          ]
         }
       }
     ]
