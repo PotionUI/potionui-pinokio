@@ -1,0 +1,11 @@
+{
+  "name": "potionui-pinokio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinokio launcher for PotionUI",
+  "license": "GPL-3.0",
+  "scripts": {
+    "check": "node --check pinokio.js && node --check install.js && node --check start.js && node --check update.js && node --check reset.js",
+    "test": "node --test test/structure.test.js"
+  }
+}

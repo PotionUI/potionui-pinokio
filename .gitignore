@@ -1,0 +1,6 @@
+app/
+env/
+data/
+logs/
+cache/
+node_modules/
