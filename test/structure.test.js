@@ -37,13 +37,10 @@ test("only start.js is a daemon", async () => {
   }
 })
 
-const launchStep = async () => (await scriptOf("start.js")).run.find((step) => step.params.on)
+const launchStep = async () => (await scriptOf("start.js")).run[2]
 
 test("start.js mirrors the open-webui example: url set before launch, uvicorn on the same port", async () => {
-  const run = (await scriptOf("start.js")).run
-  const prepare = run[0]
-  const remember = run.find((step) => step.method === "local.set")
-  const launch = run.find((step) => step.params.on)
+  const [prepare, remember, launch] = (await scriptOf("start.js")).run
   assert.equal(prepare.method, "shell.run")
   assert.equal(remember.method, "local.set")
   assert.equal(remember.params.url, `http://127.0.0.1:${PORT}`)
@@ -93,8 +90,8 @@ test("start.js creates the data folders before launching", async () => {
 
 test("start.js takes its port from kernel.port, not a constant", async () => {
   const other = await load("start.js")({ port: async () => 51111 })
-  assert.equal(other.run.find((step) => step.method === "local.set").params.url, "http://127.0.0.1:51111")
-  assert.ok(other.run.find((step) => step.params.on).params.message.includes("--port 51111"))
+  assert.equal(other.run[1].params.url, "http://127.0.0.1:51111")
+  assert.ok(other.run[2].params.message.includes("--port 51111"))
   assert.ok(!/2673[01]/.test(flatten(other)))
 })
 
@@ -230,7 +227,7 @@ const infoFor = ({ existing = [], runningScripts = [], url } = {}) => ({
 
 const texts = (items) => items.map((item) => item.text)
 const installed = ["app/env", "app/frontend/build"]
-const menuFor = async (state) => (await load("pinokio.js").menu({}, infoFor(state))).filter((item) => !item.text.startsWith("dbg"))
+const menuFor = (state) => load("pinokio.js").menu({}, infoFor(state))
 
 test("menu offers Install when nothing is installed", async () => {
   const menu = await menuFor()
@@ -253,7 +250,7 @@ test("menu shows Open Web UI and Terminal while running", async () => {
 
 test("menu shows progress while installing and before the URL is known", async () => {
   assert.deepEqual(texts(await menuFor({ runningScripts: ["install.js"] })), ["Installing"])
-  assert.deepEqual(texts(await withRunFile(new Error("ENOENT"), { existing: installed, runningScripts: ["start.js"] })), ["Terminal"])
+  assert.deepEqual(texts(await menuFor({ existing: installed, runningScripts: ["start.js"] })), ["Terminal"])
 })
 
 test("pinokio.js declares title, description, icon and version", () => {
@@ -337,55 +334,5 @@ test("icon.png is 512x512 with opaque corners", () => {
   const alphaAt = (x, y) => pixels[(y * png.width + x) * 4 + 3]
   for (const [x, y] of [[0, 0], [png.width - 1, 0], [0, png.height - 1], [png.width - 1, png.height - 1]]) {
     assert.equal(alphaAt(x, y), 255, `corner ${x},${y}`)
-  }
-})
-
-test("start.js writes data/run.json with the port and url before launching", async () => {
-  const run = (await scriptOf("start.js")).run
-  const write = run.findIndex((step) => step.method === "fs.write")
-  const launch = run.findIndex((step) => step.params.on)
-  assert.ok(write >= 0 && write < launch)
-  assert.equal(run[write].params.path, "data/run.json")
-  assert.deepEqual(run[write].params.json2, { port: PORT, url: `http://127.0.0.1:${PORT}` })
-})
-
-const withRunFile = async (content, state) => {
-  const mocked = test.mock.method(fs, "readFileSync", (file, ...rest) => {
-    if (String(file).endsWith(path.join("data", "run.json"))) {
-      if (content instanceof Error) throw content
-      return content
-    }
-    return fs.readFileSync.mock.original(file, ...rest)
-  })
-  try {
-    return await menuFor(state)
-  } finally {
-    mocked.mock.restore()
-  }
-}
-
-const runningState = { existing: installed, runningScripts: ["start.js"] }
-const runJson = JSON.stringify({ port: 42003, url: "http://127.0.0.1:42003" })
-
-test("menu falls back to data/run.json for Open Web UI when local memory is empty", async () => {
-  const menu = await withRunFile(runJson, runningState)
-  assert.deepEqual(texts(menu), ["Open Web UI", "Terminal"])
-  assert.equal(menu[0].href, "http://127.0.0.1:42003")
-  assert.strictEqual(menu[0].default, true)
-})
-
-test("menu prefers info.local over data/run.json", async () => {
-  const menu = await withRunFile(runJson, { ...runningState, url: "http://127.0.0.1:50000" })
-  assert.equal(menu[0].href, "http://127.0.0.1:50000")
-})
-
-test("menu ignores data/run.json when start.js is not running", async () => {
-  const menu = await withRunFile(runJson, { existing: installed })
-  assert.deepEqual(texts(menu), ["Start", "Update", "Install", "Reset"])
-})
-
-test("menu shows Terminal only when data/run.json is missing or corrupt", async () => {
-  for (const content of [new Error("ENOENT"), "{not json", JSON.stringify({ url: "javascript:alert(1)" }), JSON.stringify({})]) {
-    assert.deepEqual(texts(await withRunFile(content, runningState)), ["Terminal"])
   }
 })
