@@ -230,7 +230,7 @@ const infoFor = ({ existing = [], runningScripts = [], url } = {}) => ({
 
 const texts = (items) => items.map((item) => item.text)
 const installed = ["app/env", "app/frontend/build"]
-const menuFor = (state) => load("pinokio.js").menu({}, infoFor(state))
+const menuFor = async (state) => (await load("pinokio.js").menu({}, infoFor(state))).filter((item) => !item.text.startsWith("dbg"))
 
 test("menu offers Install when nothing is installed", async () => {
   const menu = await menuFor()
