@@ -7,8 +7,8 @@ A [Pinokio](https://pinokio.computer) launcher for [PotionUI](https://github.com
 | Menu item | Script | Effect |
 | --- | --- | --- |
 | Install | `install.js` | Clones PotionUI into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env`, installs the backend with `uv`, installs ffmpeg through conda and builds the frontend |
-| Start | `start.js` | Runs PotionUI's backend with uvicorn on a free port taken from Pinokio (`{{port}}`). The backend serves the built UI itself, so there is one process |
-| Open Web UI / Terminal | | Shown while running. The URL is captured from the first `http://host:port` in the output (the `Uvicorn running on ...` line) |
+| Start | `start.js` | Takes a free port from `kernel.port()`, stores `http://127.0.0.1:<port>` as the `url` local variable, then runs PotionUI's backend with uvicorn on that port. The backend serves the built UI itself, so there is one process |
+| Open Web UI / Terminal | | Shown while running. The URL is set before launch, as in Pinokio's `open-webui` example, so it does not depend on matching the console output. It can appear a few seconds before the app finishes starting |
 | Update | `update.js` | `git pull` in `app/`, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
 | Reset | `reset.js` | Deletes `app/env`, `app/frontend/node_modules` and `app/frontend/build` |
 
@@ -59,7 +59,7 @@ Open the Web UI and create the owner account. From the same machine no claim cod
 node --test test/structure.test.js
 ```
 
-The tests check script structure and menu states against a mock `info`, match the start regex against PotionUI's real startup line, assert that `when` expressions use only documented template helpers, and assert that update and reset never delete `data/`.
+The tests check script structure, the start port and url wiring, and menu states against a mock `info`, assert that `when` expressions use only documented template helpers, and assert that update and reset never delete `data/`.
 
 ## What the maintainer must check in real Pinokio
 

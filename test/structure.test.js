@@ -5,6 +5,11 @@ const path = require("node:path")
 
 const root = path.resolve(__dirname, "..")
 const load = (name) => require(path.join(root, name))
+const PORT = 42003
+const scriptOf = async (name) => {
+  const loaded = load(name)
+  return typeof loaded === "function" ? loaded({ port: async () => PORT }) : loaded
+}
 const scripts = ["install.js", "start.js", "update.js", "reset.js"]
 
 const parseEvent = (source) => {
@@ -15,9 +20,9 @@ const parseEvent = (source) => {
 
 const flatten = (value) => JSON.stringify(value)
 
-test("every script exports a run array of method steps", () => {
+test("every script exports a run array of method steps", async () => {
   for (const name of scripts) {
-    const script = load(name)
+    const script = await scriptOf(name)
     assert.ok(Array.isArray(script.run) && script.run.length > 0, `${name}: run`)
     for (const step of script.run) {
       assert.equal(typeof step.method, "string", `${name}: method`)
@@ -25,61 +30,59 @@ test("every script exports a run array of method steps", () => {
   }
 })
 
-test("only start.js is a daemon", () => {
-  assert.strictEqual(load("start.js").daemon, true)
+test("only start.js is a daemon", async () => {
+  assert.strictEqual((await scriptOf("start.js")).daemon, true)
   for (const name of ["install.js", "update.js", "reset.js"]) {
     assert.notStrictEqual(load(name).daemon, true, name)
   }
 })
 
-test("start.js runs the backend in a shell and keeps it alive on the URL line", () => {
-  const [launch, remember] = load("start.js").run
+const launchStep = async () => (await scriptOf("start.js")).run[2]
+
+test("start.js mirrors the open-webui example: url set before launch, uvicorn on the same port", async () => {
+  const [prepare, remember, launch] = (await scriptOf("start.js")).run
+  assert.equal(prepare.method, "shell.run")
+  assert.equal(remember.method, "local.set")
+  assert.equal(remember.params.url, `http://127.0.0.1:${PORT}`)
   assert.equal(launch.method, "shell.run")
-  assert.ok(launch.params.message.some((line) => line.startsWith("python -m uvicorn api:app --host 127.0.0.1 --port {{port}}")))
+  assert.equal(typeof launch.params.message, "string")
+  assert.ok(launch.params.message.startsWith(`python -m uvicorn api:app --host 127.0.0.1 --port ${PORT} `))
   assert.equal(launch.params.path, "app")
   assert.equal(launch.params.venv, "env")
-  assert.equal(launch.params.on.length, 1)
-  assert.strictEqual(launch.params.on[0].done, true)
-  assert.equal(remember.method, "local.set")
-  assert.equal(remember.params.url, "{{input.event[1]}}")
 })
 
-test("start.js uses the guide's capture pattern verbatim", () => {
-  const event = load("start.js").run[0].params.on[0].event
-  assert.equal(event, "/(http:\\/\\/[0-9.:]+)/")
+test("start.js does not depend on the console regex for the url", async () => {
+  const run = (await scriptOf("start.js")).run
+  const remember = run.findIndex((step) => step.method === "local.set")
+  const launch = run.findIndex((step) => step.params.on)
+  assert.ok(remember >= 0 && remember < launch)
+  assert.ok(!flatten(run[remember]).includes("input.event"))
 })
 
-test("start.js URL regex matches PotionUI's real startup line", () => {
-  const regex = parseEvent(load("start.js").run[0].params.on[0].event)
-  const lines = [
-    "Uvicorn running on http://127.0.0.1:41234 (Press CTRL+C to quit)",
-    "Uvicorn running on \u001b[1mhttp://127.0.0.1:41234\u001b[0m (Press CTRL+C to quit)",
-    "           INFO     Uvicorn running on http://127.0.0.1:41234       server.py:222"
-  ]
-  for (const line of lines) {
-    const match = line.match(regex)
-    assert.ok(match, line)
-    assert.equal(match[1], "http://127.0.0.1:41234")
-  }
+test("start.js readiness event is an optional extra that keeps the shell alive", async () => {
+  const [handler] = (await launchStep()).params.on
+  assert.strictEqual(handler.done, true)
+  assert.ok(parseEvent(handler.event).test("Uvicorn running on http://127.0.0.1:42003 (Press CTRL+C to quit)"))
 })
 
-test("start.js turns off terminal colour and styling so the URL stays contiguous", () => {
-  const env = load("start.js").run[0].params.env
-  assert.equal(env.NO_COLOR, "1")
-  assert.equal(env.TERM, "dumb")
-})
-
-test("start.js takes a free port from Pinokio instead of hard-coding one", () => {
-  const text = flatten(load("start.js"))
-  assert.ok(text.includes("--port {{port}}"))
-  assert.ok(!/2673[01]/.test(text))
-})
-
-test("start.js keeps storage, database and models outside the app checkout", () => {
-  const env = load("start.js").run[0].params.env
+test("start.js keeps storage, database and models outside the app checkout", async () => {
+  const env = (await launchStep()).params.env
   for (const key of ["POTIONUI_STORAGE_PATH", "POTIONUI_DB_PATH", "POTIONUI_MODELS_DIR"]) {
     assert.match(env[key], /path\.resolve\(cwd, 'data'/, key)
   }
+})
+
+test("start.js creates the data folders before launching", async () => {
+  const [prepare] = (await scriptOf("start.js")).run
+  assert.ok(prepare.params.message.includes("os.makedirs"))
+  assert.ok(prepare.params.env.POTIONUI_STORAGE_PATH.includes("'data'"))
+})
+
+test("start.js takes its port from kernel.port, not a constant", async () => {
+  const other = await load("start.js")({ port: async () => 51111 })
+  assert.equal(other.run[1].params.url, "http://127.0.0.1:51111")
+  assert.ok(other.run[2].params.message.includes("--port 51111"))
+  assert.ok(!/2673[01]/.test(flatten(other)))
 })
 
 test("update.js never deletes anything and reruns install", () => {
@@ -96,11 +99,11 @@ test("reset.js removes only the environment and frontend artefacts", () => {
   assert.ok(!/data|storage|models/.test(flatten(removals)))
 })
 
-test("install.js removes only app and nothing else deletes files", () => {
+test("install.js removes only app and nothing else deletes files", async () => {
   const removed = load("install.js").run.filter((step) => step.method === "fs.rm").map((step) => step.params.path)
   assert.deepEqual(removed, ["app"])
   for (const name of ["start.js", "update.js"]) {
-    assert.ok(!/fs\.rm|rm -rf|rmdir|del /.test(flatten(load(name))), name)
+    assert.ok(!/fs\.rm|rm -rf|rmdir|del /.test(flatten(await scriptOf(name))), name)
   }
 })
 
@@ -191,9 +194,9 @@ const rootIdentifiers = (expression) =>
     .replace(/'[^']*'|"[^"]*"/g, "''")
     .match(/(?<![\w.$])[A-Za-z_$][\w$]*/g) || []
 
-test("template expressions use only documented Pinokio helpers", () => {
+test("template expressions use only documented Pinokio helpers", async () => {
   for (const name of scripts) {
-    for (const expression of templateExpressions(load(name))) {
+    for (const expression of templateExpressions(await scriptOf(name))) {
       for (const identifier of rootIdentifiers(expression)) {
         assert.ok(documentedHelpers.has(identifier), `${name}: {{${expression}}} uses ${identifier}`)
       }
