@@ -1,21 +1,21 @@
 module.exports = {
   run: [
     {
-      when: "{{kernel.exists(cwd, 'env')}}",
+      when: "{{exists('app/env')}}",
       method: "fs.rm",
       params: {
-        path: "env"
+        path: "app/env"
       }
     },
     {
-      when: "{{kernel.exists(cwd, 'app', 'frontend', 'node_modules')}}",
+      when: "{{exists('app/frontend/node_modules')}}",
       method: "fs.rm",
       params: {
         path: "app/frontend/node_modules"
       }
     },
     {
-      when: "{{kernel.exists(cwd, 'app', 'frontend', 'build')}}",
+      when: "{{exists('app/frontend/build')}}",
       method: "fs.rm",
       params: {
         path: "app/frontend/build"

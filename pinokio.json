@@ -1,0 +1,8 @@
+{
+  "title": "PotionUI",
+  "description": "Self-hosted AI image and video generation with a preset-driven interface, a native diffusers engine and ComfyUI support.",
+  "icon": "icon.png",
+  "links": [
+    { "title": "GitHub", "value": "https://github.com/PotionUI/PotionUI" }
+  ]
+}

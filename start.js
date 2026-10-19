@@ -4,8 +4,8 @@ module.exports = {
     {
       method: "shell.run",
       params: {
+        venv: "env",
         path: "app",
-        conda: { path: "{{path.resolve(cwd, 'env')}}" },
         env: {
           PYTHONUTF8: "1",
           PYTHONUNBUFFERED: "1",
@@ -15,11 +15,11 @@ module.exports = {
         },
         message: [
           "python -c \"import os; [os.makedirs(os.environ[k], exist_ok=True) for k in ('POTIONUI_STORAGE_PATH', 'POTIONUI_MODELS_DIR')]\"",
-          "python api.py"
+          "python -m uvicorn api:app --host 127.0.0.1 --port {{port}} --limit-concurrency 1000 --timeout-keep-alive 30 --timeout-graceful-shutdown 30"
         ],
         on: [
           {
-            event: "/Uvicorn running on[^h]*(http:\\/\\/[0-9.]+:[0-9]+)/",
+            event: "/(http:\\/\\/[0-9.:]+)/",
             done: true
           }
         ]
