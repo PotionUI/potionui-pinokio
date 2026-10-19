@@ -39,6 +39,9 @@ No `fs.link` virtual drive is configured. PotionUI's models folder has its own l
 
 ### First run
 
+If the page is blank right after Start, refresh once: Open Web UI appears before the server finishes starting.
+
+
 Open the Web UI and create the owner account. From the same machine no claim code is needed.
 
 ## Installing from Pinokio
