@@ -2,14 +2,25 @@
 
 A [Pinokio](https://pinokio.computer) launcher for [PotionUI](https://github.com/PotionUI/PotionUI), the self-hosted AI image and video generation platform.
 
+## Requirements
+
+This launcher installs PotionUI 0.0.16.
+
+- Windows or Linux with an NVIDIA GPU. PotionUI's tested matrix is Linux x86_64 with NVIDIA; native Windows is experimental.
+- NVIDIA driver 580 or newer (the CUDA 13 build). Turing or newer cards only (RTX 20xx / GTX 16xx and up); GTX 10-series and older cannot run it.
+- Minimum 8 GB VRAM and 16 GB system RAM, which runs the SDXL family. PotionUI recommends 16 to 24 GB VRAM and 32 GB RAM; larger model families need more.
+- Disk: models are downloaded on demand and range from a few GB per SDXL checkpoint to about 27 GB for LTX-2/2.3. PotionUI's [Hardware Requirements](https://github.com/PotionUI/PotionUI/blob/master/docs/user/hardware-requirements.md) lists each family.
+- Python 3.12 is provided by the launcher.
+- macOS and machines without an NVIDIA GPU: Install still works but warns first, then installs the remote-only build. Local generation is unavailable; it only works with a remote worker or a cloud backend.
+
 ## What it does
 
 | Menu item | Script | Effect |
 | --- | --- | --- |
-| Install | `install.js` | Clones PotionUI into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env`, installs the backend with `uv`, installs ffmpeg through conda and builds the frontend |
+| Install | `install.js` | Clones PotionUI v0.0.16 into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env`, installs the backend with `uv`, installs ffmpeg through conda and builds the frontend |
 | Start | `start.js` | Takes a free port from `kernel.port()`, stores `http://127.0.0.1:<port>` as the `url` local variable, then runs PotionUI's backend with uvicorn on that port. The backend serves the built UI itself, so there is one process |
 | Open Web UI / Terminal | | Shown while running. The URL is set before launch, as in Pinokio's `open-webui` example, so it does not depend on matching the console output. It can appear a few seconds before the app finishes starting. |
-| Update | `update.js` | `git pull` in `app/`, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
+| Update | `update.js` | Fetches and checks out the v0.0.16 tag in `app/`, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
 | Reset | `reset.js` | Deletes `app/env`, `app/frontend/node_modules` and `app/frontend/build` |
 
 ### Install strategy
@@ -21,7 +32,8 @@ A [Pinokio](https://pinokio.computer) launcher for [PotionUI](https://github.com
 - `./potionui start` is not used. It spawns detached child processes and exits, which a Pinokio daemon cannot supervise. `start.js` runs the same uvicorn command the CLI uses.
 - The port is not fixed. The frontend derives its API and WebSocket addresses from `window.location`, and nothing in PotionUI's backend or frontend source refers to port 26730 when the backend serves the built frontend.
 - Windows with NVIDIA adds PyTorch's `cu130` index, as PotionUI's own installer does.
-- No NVIDIA GPU (AMD, Apple, CPU): installs `requirements-cpu.txt` (PotionUI's "remote" profile). Local generation is unavailable there. Use a remote worker or cloud backends.
+- No NVIDIA GPU (AMD, Apple, CPU): a warning notification appears before anything is cloned or installed, then `requirements-cpu.txt` (PotionUI's "remote" profile) is installed. Local generation is unavailable there. Use a remote worker or cloud backends.
+- The app version is pinned. `install.js` clones `--branch v0.0.16` and `update.js` checks out the same tag, so the installed app is exactly the version the launcher shows. A new PotionUI release reaches users when this launcher changes the tag in `install.js`, `update.js`, the descriptions and the README.
 - NVIDIA driver 580 or newer is required for the CUDA 13 build.
 
 ### Where data lives

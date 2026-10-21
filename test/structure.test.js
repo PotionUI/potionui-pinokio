@@ -98,7 +98,7 @@ test("start.js takes its port from kernel.port, not a constant", async () => {
 test("update.js never deletes anything and reruns install", () => {
   const update = load("update.js")
   assert.ok(!update.run.some((step) => step.method.startsWith("fs.")))
-  assert.ok(update.run.some((step) => step.params.message === "git pull" && step.params.path === "app"))
+  assert.ok(update.run.some((step) => step.params.message === "git checkout v0.0.16" && step.params.path === "app"))
   assert.ok(update.run.some((step) => step.method === "script.start" && step.params.uri === "install.js"))
 })
 
@@ -178,7 +178,7 @@ test("install.js leaves a complete app alone", () => {
 test("install.js clones shallow into app and builds the frontend", () => {
   const steps = load("install.js").run
   const clone = steps.find((step) => flatten(step.params).includes("git clone"))
-  assert.equal(clone.params.message, "git clone --depth 1 https://github.com/PotionUI/PotionUI.git app")
+  assert.equal(clone.params.message, "git clone --depth 1 --branch v0.0.16 https://github.com/PotionUI/PotionUI.git app")
   const build = steps.find((step) => step.params && step.params.path === "app/frontend")
   assert.deepEqual(build.params.message, ["npm install", "npm run build"])
 })
@@ -334,5 +334,50 @@ test("icon.png is 512x512 with opaque corners", () => {
   const alphaAt = (x, y) => pixels[(y * png.width + x) * 4 + 3]
   for (const [x, y] of [[0, 0], [png.width - 1, 0], [0, png.height - 1], [png.width - 1, png.height - 1]]) {
     assert.equal(alphaAt(x, y), 255, `corner ${x},${y}`)
+  }
+})
+
+const APP_VERSION = "0.0.16"
+
+test("the app version is pinned to one tag across install, update, metadata and README", () => {
+  const tag = `v${APP_VERSION}`
+  const clone = load("install.js").run.find((step) => flatten(step.params).includes("git clone"))
+  assert.ok(clone.params.message.includes(`--branch ${tag} `))
+  const messages = load("update.js").run.map((step) => step.params.message)
+  assert.ok(messages.includes(`git fetch --depth 1 origin tag ${tag}`))
+  assert.ok(messages.includes(`git checkout ${tag}`))
+  assert.ok(!messages.includes("git pull"))
+  const json = JSON.parse(fs.readFileSync(path.join(root, "pinokio.json"), "utf8"))
+  assert.equal(load("pinokio.js").version, "7.0")
+  for (const description of [load("pinokio.js").description, json.description]) {
+    assert.ok(description.startsWith(`PotionUI ${APP_VERSION}:`))
+  }
+  assert.ok(fs.readFileSync(path.join(root, "README.md"), "utf8").includes(`PotionUI ${APP_VERSION}`))
+})
+
+test("requirements are stated in both descriptions and the README", () => {
+  const json = JSON.parse(fs.readFileSync(path.join(root, "pinokio.json"), "utf8"))
+  assert.equal(load("pinokio.js").description, json.description)
+  for (const needle of ["Windows or Linux", "NVIDIA", "580", "8 GB VRAM", "16 GB RAM", "remote-only"]) {
+    assert.ok(json.description.includes(needle), needle)
+  }
+  const readme = fs.readFileSync(path.join(root, "README.md"), "utf8")
+  assert.ok(readme.includes("## Requirements"))
+  for (const needle of ["driver 580", "8 GB VRAM", "16 GB system RAM", "32 GB RAM", "remote worker or a cloud backend"]) {
+    assert.ok(readme.includes(needle), needle)
+  }
+})
+
+test("install.js warns non-NVIDIA machines before the clone and the heavy install", () => {
+  const steps = load("install.js").run
+  const warnIndex = steps.findIndex((step) => step.method === "notify" && String(step.when).includes("!== 'nvidia'") && step.params.html.includes("remote worker or a cloud backend"))
+  assert.ok(warnIndex >= 0)
+  const warning = steps[warnIndex]
+  assert.equal(warning.when, "{{gpu !== 'nvidia'}}")
+  assert.ok(warning.params.html.includes("Windows or Linux with an NVIDIA GPU"))
+  const firstHeavy = steps.findIndex((step) => step.method === "shell.run" || step.method === "fs.rm")
+  assert.ok(warnIndex < firstHeavy)
+  for (const expression of templateExpressions(warning)) {
+    for (const identifier of rootIdentifiers(expression)) assert.ok(documentedHelpers.has(identifier), identifier)
   }
 })

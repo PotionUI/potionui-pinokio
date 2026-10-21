@@ -4,7 +4,14 @@ module.exports = {
       method: "shell.run",
       params: {
         path: "app",
-        message: "git pull"
+        message: "git fetch --depth 1 origin tag v0.0.16"
+      }
+    },
+    {
+      method: "shell.run",
+      params: {
+        path: "app",
+        message: "git checkout v0.0.16"
       }
     },
     {

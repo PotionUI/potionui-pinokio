@@ -1,7 +1,7 @@
 module.exports = {
   version: "7.0",
   title: "PotionUI",
-  description: "Self-hosted AI image and video generation with a preset-driven interface, a native diffusers engine and ComfyUI support.",
+  description: "PotionUI 0.0.16: self-hosted AI image and video generation with a preset-driven interface, a native diffusers engine and ComfyUI support. Requires Windows or Linux with an NVIDIA GPU (driver 580 or newer, 8 GB VRAM and 16 GB RAM minimum). Other machines get a remote-only install.",
   icon: "icon.png",
   menu: async (kernel, info) => {
     const installed = info.exists("app/env") && info.exists("app/frontend/build")

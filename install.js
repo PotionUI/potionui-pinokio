@@ -4,6 +4,13 @@ module.exports = {
   },
   run: [
     {
+      when: "{{gpu !== 'nvidia'}}",
+      method: "notify",
+      params: {
+        html: "No NVIDIA GPU detected. Local generation needs Windows or Linux with an NVIDIA GPU (driver 580 or newer). This install is the remote-only build: it works only with a remote worker or a cloud backend."
+      }
+    },
+    {
       when: "{{exists('app') && !(exists('app/api.py') && exists('app/requirements.txt'))}}",
       method: "fs.rm",
       params: {
@@ -14,7 +21,7 @@ module.exports = {
       when: "{{!(exists('app/api.py') && exists('app/requirements.txt'))}}",
       method: "shell.run",
       params: {
-        message: "git clone --depth 1 https://github.com/PotionUI/PotionUI.git app"
+        message: "git clone --depth 1 --branch v0.0.16 https://github.com/PotionUI/PotionUI.git app"
       }
     },
     {
