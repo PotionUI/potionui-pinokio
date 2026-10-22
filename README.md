@@ -4,7 +4,7 @@ A [Pinokio](https://pinokio.computer) launcher for [PotionUI](https://github.com
 
 ## Requirements
 
-This launcher installs PotionUI 0.0.16.
+This launcher installs PotionUI 0.0.17.
 
 - Windows or Linux with an NVIDIA GPU. PotionUI's tested matrix is Linux x86_64 with NVIDIA; native Windows is experimental.
 - NVIDIA driver 580 or newer (the CUDA 13 build). Turing or newer cards only (RTX 20xx / GTX 16xx and up); GTX 10-series and older cannot run it.
@@ -17,10 +17,10 @@ This launcher installs PotionUI 0.0.16.
 
 | Menu item | Script | Effect |
 | --- | --- | --- |
-| Install | `install.js` | Clones PotionUI v0.0.16 into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env` with `uv` (replacing one built with another Python), installs the backend into it with `uv`, checks that the env is Python 3.12 and that `uvicorn`, `fastapi` and `torch` import, installs ffmpeg through conda and builds the frontend. When the clone, the env or the package install fails it stops there and says so |
+| Install | `install.js` | Clones PotionUI v0.0.17 into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env` with `uv` (replacing one built with another Python), installs the backend into it with `uv`, checks that the env is Python 3.12 and that `uvicorn`, `fastapi` and `torch` import, installs ffmpeg through conda and builds the frontend. When the clone, the env or the package install fails it stops there and says so |
 | Start | `start.js` | Takes a free port from `kernel.port()`, stores `http://127.0.0.1:<port>` as the `url` local variable, then runs PotionUI's backend with uvicorn on that port. The backend serves the built UI itself, so there is one process |
 | Open Web UI / Terminal | | Shown while running. The URL is set before launch, as in Pinokio's `open-webui` example, so it does not depend on matching the console output. It can appear a few seconds before the app finishes starting. |
-| Update | `update.js` | Discards the `frontend/package-lock.json` change that `npm install` leaves behind, fetches and checks out the v0.0.16 tag in `app/`, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
+| Update | `update.js` | Discards the `frontend/package-lock.json` change that `npm install` leaves behind, fetches and checks out the v0.0.17 tag in `app/`, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
 | Reset | `reset.js` | Deletes `app/env`, `app/frontend/node_modules` and `app/frontend/build` |
 
 ### Install strategy
@@ -34,7 +34,7 @@ This launcher installs PotionUI 0.0.16.
 - The port is not fixed. The frontend derives its API and WebSocket addresses from `window.location`, and nothing in PotionUI's backend or frontend source refers to port 26730 when the backend serves the built frontend.
 - Windows with NVIDIA adds PyTorch's `cu130` index, as PotionUI's own installer does.
 - No NVIDIA GPU (AMD, Apple, CPU): a warning notification appears before anything is cloned or installed, then `requirements-cpu.txt` (PotionUI's "remote" profile) is installed. Local generation is unavailable there. Use a remote worker or cloud backends.
-- The app version is pinned. `install.js` clones `--branch v0.0.16` and `update.js` checks out the same tag, so the installed app is exactly the version the launcher shows. A new PotionUI release reaches users when this launcher changes the tag in `install.js`, `update.js`, the descriptions and the README.
+- The app version is pinned. `install.js` clones `--branch v0.0.17` and `update.js` checks out the same tag, so the installed app is exactly the version the launcher shows. A new PotionUI release reaches users when this launcher changes the tag in `install.js`, `update.js`, the descriptions and the README.
 - NVIDIA driver 580 or newer is required for the CUDA 13 build.
 - Pinokio keeps running a script after a shell command fails, so `install.js` cannot rely on a failed `uv pip install` stopping it. Instead the verification step deletes `app/env/.deps-verified` and recreates it only when the env's interpreter is Python 3.12 and `uvicorn`, `fastapi` and `torch` import in it. The ffmpeg install, the frontend build and the success notification run only when that file exists; otherwise a notification explains that the install did not finish. The pip steps run only when `app/env/pyvenv.cfg` exists, so a failed clone or a failed env creation installs nothing.
 - The menu offers Start only when `app/env`, `app/frontend/build` and the venv's `uvicorn` entry point all exist (`app/env/bin/uvicorn`, or `app/env/Scripts/uvicorn.exe` on Windows). A venv without it shows Repair install (or Install when nothing exists) instead of Start. The entry point is checked rather than the `.deps-verified` file so installs made before that file existed still show Start.

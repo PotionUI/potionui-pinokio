@@ -101,7 +101,7 @@ test("start.js takes its port from kernel.port, not a constant", async () => {
 test("update.js never deletes anything and reruns install", () => {
   const update = load("update.js")
   assert.ok(!update.run.some((step) => step.method.startsWith("fs.")))
-  assert.ok(update.run.some((step) => step.params.message === "git checkout v0.0.16" && step.params.path === "app"))
+  assert.ok(update.run.some((step) => step.params.message === "git checkout v0.0.17" && step.params.path === "app"))
   assert.ok(update.run.some((step) => step.method === "script.start" && step.params.uri === "install.js"))
 })
 
@@ -192,7 +192,7 @@ test("install.js leaves a complete app alone", () => {
 test("install.js clones shallow into app and builds the frontend", () => {
   const steps = load("install.js").run
   const clone = steps.find((step) => flatten(step.params).includes("git clone"))
-  assert.equal(clone.params.message, "git clone --depth 1 --branch v0.0.16 https://github.com/PotionUI/PotionUI.git app")
+  assert.equal(clone.params.message, "git clone --depth 1 --branch v0.0.17 https://github.com/PotionUI/PotionUI.git app")
   const build = steps.find((step) => step.params && step.params.path === "app/frontend")
   assert.deepEqual(build.params.message, ["npm install", "npm run build"])
 })
@@ -385,7 +385,7 @@ test("icon.png is 512x512 with opaque corners", () => {
   }
 })
 
-const APP_VERSION = "0.0.16"
+const APP_VERSION = "0.0.17"
 
 test("the app version is pinned to one tag across install, update, metadata and README", () => {
   const tag = `v${APP_VERSION}`
@@ -727,8 +727,8 @@ const buildUpdateFixture = () => {
   write("content/presets/marketplace/new.yml", "new\n")
   git(origin, ["add", "-A"])
   git(origin, ["commit", "-q", "-m", "two"])
-  git(origin, ["tag", "v0.0.16"])
-  const target = git(origin, ["rev-parse", "v0.0.16^{commit}"])
+  git(origin, ["tag", "v0.0.17"])
+  const target = git(origin, ["rev-parse", "v0.0.17^{commit}"])
   git(root, ["clone", "-q", "--depth", "1", "--branch", "v0.0.15", pathToFileURL(origin).href, "app"])
   const app = path.join(root, "app")
   const mine = {
@@ -786,14 +786,14 @@ test("without the lock file restore the same checkout is refused, which is what 
 
 test("update.js restores only the lock file, never forces the checkout and still refuses to overwrite other edits", () => {
   const messages = updateGitSteps().map((step) => step.params.message)
-  assert.deepEqual(messages, ["git checkout -- frontend/package-lock.json", "git fetch --depth 1 origin tag v0.0.16", "git checkout v0.0.16"])
+  assert.deepEqual(messages, ["git checkout -- frontend/package-lock.json", "git fetch --depth 1 origin tag v0.0.17", "git checkout v0.0.17"])
   assert.ok(!/(^| )(-f|--force|reset|clean|stash)( |$)/.test(messages.join(" ")))
   const fixture = buildUpdateFixture()
   try {
     fs.writeFileSync(path.join(fixture.app, "api.py"), "edited by the user\n", "utf8")
     fs.writeFileSync(path.join(fixture.origin, "api.py"), "tag two\n", "utf8")
     git(fixture.origin, ["commit", "-q", "-am", "api"])
-    git(fixture.origin, ["tag", "-f", "v0.0.16"])
+    git(fixture.origin, ["tag", "-f", "v0.0.17"])
     const outcomes = runUpdateGit(fixture, updateGitSteps())
     assert.notEqual(outcomes[2], 0)
     assert.equal(fs.readFileSync(path.join(fixture.app, "api.py"), "utf8"), "edited by the user\n")
