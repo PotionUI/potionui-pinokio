@@ -115,10 +115,7 @@ module.exports = {
       method: "shell.run",
       params: {
         path: "app/frontend",
-        message: [
-          "npm install",
-          "npm run build"
-        ]
+        message: "node ../../build-frontend.js"
       }
     },
     {

@@ -194,7 +194,57 @@ test("install.js clones shallow into app and builds the frontend", () => {
   const clone = steps.find((step) => flatten(step.params).includes("git clone"))
   assert.equal(clone.params.message, "git clone --depth 1 --branch v0.0.17 https://github.com/PotionUI/PotionUI.git app")
   const build = steps.find((step) => step.params && step.params.path === "app/frontend")
-  assert.deepEqual(build.params.message, ["npm install", "npm run build"])
+  assert.equal(build.params.message, "node ../../build-frontend.js")
+  assert.ok(fs.existsSync(path.join(root, "build-frontend.js")))
+})
+
+test("build-frontend.js moves into the folder's real path before npm install and npm run build", () => {
+  const sandbox = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "potionui-build-")))
+  const log = path.join(sandbox, "calls.json")
+  const preload = path.join(sandbox, "preload.js")
+  fs.writeFileSync(preload, `
+const fs = require("fs")
+const childProcess = require("child_process")
+const calls = []
+const save = () => fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(calls))
+fs.realpathSync.native = (value) => { calls.push(["realpath", value]); return "/Canonical/Pinokio/app/frontend" }
+process.chdir = (value) => { calls.push(["chdir", value]); save() }
+childProcess.execSync = (command, options) => { calls.push(["exec", command, options && options.stdio]); save() }
+`)
+  try {
+    const result = spawnSync(process.execPath, ["--require", preload, path.join(root, "build-frontend.js")], {
+      cwd: sandbox,
+      encoding: "utf8",
+    })
+    assert.equal(result.status, 0, result.stderr)
+    assert.deepEqual(JSON.parse(fs.readFileSync(log, "utf8")), [
+      ["realpath", sandbox],
+      ["chdir", "/Canonical/Pinokio/app/frontend"],
+      ["exec", "npm install", "inherit"],
+      ["exec", "npm run build", "inherit"],
+    ])
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true })
+  }
+})
+
+test("build-frontend.js fails the step when the build fails", () => {
+  const sandbox = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "potionui-build-")))
+  const bin = path.join(sandbox, "bin")
+  fs.mkdirSync(bin)
+  const fakeNpm = path.join(bin, "npm")
+  fs.writeFileSync(fakeNpm, `#!/bin/sh\n[ "$1" = "run" ] && exit 3\nexit 0\n`)
+  fs.chmodSync(fakeNpm, 0o755)
+  try {
+    const result = spawnSync(process.execPath, [path.join(root, "build-frontend.js")], {
+      cwd: sandbox,
+      env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+      encoding: "utf8",
+    })
+    assert.notEqual(result.status, 0)
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true })
+  }
 })
 
 const documentedHelpers = new Set([
