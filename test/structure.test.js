@@ -1,7 +1,10 @@
 const test = require("node:test")
 const assert = require("node:assert")
 const fs = require("node:fs")
+const os = require("node:os")
 const path = require("node:path")
+const { spawnSync } = require("node:child_process")
+const { pathToFileURL } = require("node:url")
 
 const root = path.resolve(__dirname, "..")
 const load = (name) => require(path.join(root, name))
@@ -117,39 +120,11 @@ test("install.js removes only app and nothing else deletes files", async () => {
   }
 })
 
-test("install.js declares the AI bundle and installs with uv into a Python 3.12 venv", () => {
-  const install = load("install.js")
-  assert.deepEqual(install.requires, { bundle: "ai" })
-  const pip = install.run.filter((step) => String(step.params.message).includes("uv pip install -r"))
-  assert.equal(pip.length, 3)
-  for (const step of pip) {
-    assert.equal(step.params.venv, "env")
-    assert.equal(step.params.venv_python, "3.12")
-    assert.equal(step.params.path, "app")
-  }
-  assert.ok(!flatten(install).includes("pip install --upgrade"))
-})
-
-test("install.js branches pip installs on gpu and platform", () => {
-  const pip = load("install.js").run.filter((step) => String(step.params.message).includes("uv pip install -r"))
-  const nvidiaWindows = pip.find((step) => step.when.includes("win32") && step.when.includes("=== 'nvidia'"))
-  assert.ok(nvidiaWindows.params.message.includes("constraints.txt"))
-  assert.ok(nvidiaWindows.params.message.includes("whl/cu130"))
-  assert.ok(nvidiaWindows.params.message.includes("--index-strategy unsafe-best-match"))
-  const nvidiaPosix = pip.find((step) => step.when.includes("!== 'win32'"))
-  assert.ok(nvidiaPosix.params.message.includes("constraints.txt"))
-  assert.ok(!nvidiaPosix.params.message.includes("--extra-index-url"))
-  const cpu = pip.find((step) => step.when === "{{gpu !== 'nvidia'}}")
-  assert.ok(cpu.params.message.includes("requirements-cpu.txt"))
-  assert.ok(cpu.params.message.includes("whl/cpu"))
-  assert.ok(!cpu.params.message.includes("constraints.txt"))
-})
-
-const evaluateWhen = (step, existing) => {
+const evaluateWhen = (step, existing, gpu = "nvidia", platform = "linux") => {
   if (!step.when) return true
   const expression = step.when.match(/^\{\{([\s\S]*)\}\}$/)[1]
   const exists = (relative) => existing.includes(relative)
-  return Boolean(new Function("exists", "gpu", "platform", `return (${expression})`)(exists, "nvidia", "linux"))
+  return Boolean(new Function("exists", "gpu", "platform", `return (${expression})`)(exists, gpu, platform))
 }
 
 const plannedFor = (existing) => {
@@ -159,6 +134,45 @@ const plannedFor = (existing) => {
   })
   return steps.map((step) => (step.method === "fs.rm" ? `rm ${step.params.path}` : "clone"))
 }
+
+const pipSteps = () => load("install.js").run.filter((step) => String(step.params.message).startsWith("uv pip install"))
+const envInterpreter = { linux: "env/bin/python", darwin: "env/bin/python", win32: "env\\Scripts\\python.exe" }
+const withEnv = ["app", "app/api.py", "app/requirements.txt", "app/env", "app/env/pyvenv.cfg"]
+
+test("install.js declares the AI bundle and installs with uv into the env interpreter", () => {
+  const install = load("install.js")
+  assert.deepEqual(install.requires, { bundle: "ai" })
+  assert.equal(pipSteps().length, 4)
+  for (const step of pipSteps()) assert.equal(step.params.path, "app")
+  assert.ok(!flatten(install).includes("pip install --upgrade"))
+})
+
+test("every gpu and platform combination selects exactly one pip step, aimed at that platform's env interpreter", () => {
+  for (const gpu of ["nvidia", "amd"]) {
+    for (const platform of ["linux", "darwin", "win32"]) {
+      const selected = pipSteps().filter((step) => evaluateWhen(step, withEnv, gpu, platform))
+      assert.equal(selected.length, 1, `${gpu} ${platform}`)
+      assert.ok(selected[0].params.message.startsWith(`uv pip install --python ${envInterpreter[platform]} -r `), selected[0].params.message)
+    }
+  }
+})
+
+test("install.js branches pip installs on gpu and platform", () => {
+  const messageFor = (gpu, platform) => pipSteps().find((step) => evaluateWhen(step, withEnv, gpu, platform)).params.message
+  const nvidiaWindows = messageFor("nvidia", "win32")
+  assert.ok(nvidiaWindows.includes("constraints.txt"))
+  assert.ok(nvidiaWindows.includes("whl/cu130"))
+  assert.ok(nvidiaWindows.includes("--index-strategy unsafe-best-match"))
+  const nvidiaPosix = messageFor("nvidia", "linux")
+  assert.ok(nvidiaPosix.includes("constraints.txt"))
+  assert.ok(!nvidiaPosix.includes("--extra-index-url"))
+  for (const platform of ["linux", "win32"]) {
+    const cpu = messageFor("amd", platform)
+    assert.ok(cpu.includes("requirements-cpu.txt"))
+    assert.ok(cpu.includes("whl/cpu"))
+    assert.ok(!cpu.includes("constraints.txt"))
+  }
+})
 
 test("install.js heals a partial clone: no api.py means remove app and clone again", () => {
   assert.deepEqual(plannedFor(["app", "app/.git", "app/env"]), ["rm app", "clone"])
@@ -226,7 +240,9 @@ const infoFor = ({ existing = [], runningScripts = [], url } = {}) => ({
 })
 
 const texts = (items) => items.map((item) => item.text)
-const installed = ["app/env", "app/frontend/build"]
+const uvicornEntry = { linux: "app/env/bin/uvicorn", win32: "app/env/Scripts/uvicorn.exe" }
+const installedOn = (platform) => ["app/env", "app/frontend/build", uvicornEntry[platform]]
+const installed = installedOn("linux")
 const menuFor = (state) => load("pinokio.js").menu({}, infoFor(state))
 
 test("menu offers Install when nothing is installed", async () => {
@@ -251,6 +267,38 @@ test("menu shows Open Web UI and Terminal while running", async () => {
 test("menu shows progress while installing and before the URL is known", async () => {
   assert.deepEqual(texts(await menuFor({ runningScripts: ["install.js"] })), ["Installing"])
   assert.deepEqual(texts(await menuFor({ existing: installed, runningScripts: ["start.js"] })), ["Terminal"])
+})
+
+for (const platform of ["linux", "win32"]) {
+  test(`menu offers Start when the ${platform} venv has its uvicorn entry point`, async () => {
+    const menu = await menuFor({ existing: installedOn(platform) })
+    assert.deepEqual(texts(menu), ["Start", "Update", "Install", "Reset"])
+  })
+
+  test(`menu offers Repair install, never Start, when the ${platform} venv and build exist without uvicorn`, async () => {
+    const menu = await menuFor({ existing: installedOn(platform).slice(0, 2) })
+    assert.deepEqual(texts(menu), ["Repair install"])
+    assert.equal(menu[0].href, "install.js")
+    assert.strictEqual(menu[0].default, true)
+  })
+}
+
+test("menu does not accept the other platform's uvicorn path as proof of a working venv", async () => {
+  assert.deepEqual(texts(await menuFor({ existing: ["app/env", "app/frontend/build", "app/env/Scripts/uvicorn"] })), ["Repair install"])
+  assert.deepEqual(texts(await menuFor({ existing: ["app/env", "app/frontend/build", "app/env/bin/uvicorn.exe"] })), ["Repair install"])
+})
+
+test("menu offers Repair install for any half-finished install and plain Install for none", async () => {
+  assert.deepEqual(texts(await menuFor({ existing: ["app/env"] })), ["Repair install"])
+  assert.deepEqual(texts(await menuFor({ existing: ["app/frontend/build"] })), ["Repair install"])
+  assert.deepEqual(texts(await menuFor({ existing: ["app/env", uvicornEntry.linux] })), ["Repair install"])
+  assert.deepEqual(texts(await menuFor({ existing: ["app"] })), ["Install"])
+  assert.deepEqual(texts(await menuFor()), ["Install"])
+})
+
+test("menu never shows Open Web UI or Terminal for a venv without uvicorn", async () => {
+  const menu = await menuFor({ existing: ["app/env", "app/frontend/build"], runningScripts: ["start.js"], url: "http://127.0.0.1:41234" })
+  assert.deepEqual(texts(menu), ["Repair install"])
 })
 
 test("pinokio.js declares title, description, icon and version", () => {
@@ -379,5 +427,377 @@ test("install.js warns non-NVIDIA machines before the clone and the heavy instal
   assert.ok(warnIndex < firstHeavy)
   for (const expression of templateExpressions(warning)) {
     for (const identifier of rootIdentifiers(expression)) assert.ok(documentedHelpers.has(identifier), identifier)
+  }
+})
+
+const marker = "app/env/.deps-verified"
+const uvicornRelative = (platform) => ({ linux: "bin/uvicorn", win32: "Scripts/uvicorn.exe" })[platform]
+
+const simulateInstall = ({ gpu = "nvidia", platform = "linux", existing = [], envVersion = "3.12", createVersion = "3.12", cloneOk = true, pipOk = true, buildOk = true } = {}) => {
+  const files = new Set(existing)
+  let env = files.has("app/env/pyvenv.cfg") ? { version: envVersion } : null
+  const ran = []
+  const notices = []
+  const entry = `app/env/${uvicornRelative(platform)}`
+  for (const step of load("install.js").run) {
+    if (!evaluateWhen(step, [...files], gpu, platform)) continue
+    const message = String(step.params.message)
+    if (step.method === "fs.rm") {
+      ran.push("remove")
+      for (const file of [...files]) if (file === step.params.path || file.startsWith(`${step.params.path}/`)) files.delete(file)
+      if (step.params.path === "app") env = null
+    } else if (step.method === "notify") {
+      ran.push("notify")
+      notices.push(step.params.html)
+    } else if (message.includes("git clone")) {
+      ran.push("clone")
+      if (cloneOk) ["app", "app/.git", "app/api.py", "app/requirements.txt"].forEach((file) => files.add(file))
+    } else if (message.includes("shutil.rmtree('env'")) {
+      ran.push("probe")
+      if (!env || env.version !== "3.12") {
+        for (const file of [...files]) if (file === "app/env" || file.startsWith("app/env/")) files.delete(file)
+        env = null
+      }
+    } else if (message.startsWith("uv venv")) {
+      ran.push("venv")
+      assert.ok(message.includes("--python 3.12"), message)
+      assert.ok(!env, "uv venv must not run over an existing env")
+      if (createVersion) {
+        ["app/env", "app/env/pyvenv.cfg"].forEach((file) => files.add(file))
+        env = { version: createVersion }
+      }
+    } else if (message.startsWith("uv pip install")) {
+      ran.push("pip")
+      assert.ok(env, "pip needs an env")
+      if (pipOk && env.version === "3.12") files.add(entry)
+    } else if (message.includes("import uvicorn")) {
+      ran.push("verify")
+      files.delete(marker)
+      if (env && env.version === "3.12" && files.has(entry)) files.add(marker)
+    } else if (message.includes("conda install")) {
+      ran.push("ffmpeg")
+    } else if (step.params.path === "app/frontend") {
+      ran.push("build")
+      if (buildOk) files.add("app/frontend/build")
+    } else {
+      assert.fail(`unexpected step ${flatten(step)}`)
+    }
+  }
+  return { ran, notices, files, env }
+}
+
+const reportsInstalled = (notices) => notices.some((html) => html.includes("Click Start") || html.includes("CPU-only build"))
+const reportsFailure = (notices) => notices.some((html) => html.includes("click Install again"))
+const completeRun = ["clone", "probe", "venv", "pip", "verify", "ffmpeg", "build", "notify"]
+const withoutNotices = (ran) => ran.filter((name) => name !== "notify")
+
+test("install.js verifies the env right after the pip step and before ffmpeg and the frontend build", () => {
+  const steps = load("install.js").run
+  const pip = steps.map((step, index) => (String(step.params.message).startsWith("uv pip install") ? index : -1)).filter((index) => index >= 0)
+  const verify = steps.map((step, index) => (String(step.params.message).includes("import uvicorn, fastapi, torch") ? index : -1)).filter((index) => index >= 0)
+  const ffmpeg = steps.findIndex((step) => String(step.params.message).includes("conda install"))
+  const build = steps.findIndex((step) => step.params && step.params.path === "app/frontend")
+  assert.equal(verify.length, 2)
+  assert.ok(Math.min(...verify) > Math.max(...pip))
+  assert.ok(Math.max(...verify) < ffmpeg && ffmpeg < build)
+  for (const index of verify) {
+    assert.equal(steps[index].params.path, "app")
+    assert.ok(steps[index].params.message.includes("sys.version_info[:2] == (3, 12)"))
+  }
+})
+
+test("install.js runs ffmpeg, the frontend build and the success notices only when the env verified", () => {
+  const steps = load("install.js").run
+  const ffmpeg = steps.findIndex((step) => String(step.params.message).includes("conda install"))
+  for (const step of steps.slice(ffmpeg)) {
+    const gated = step.when.includes(`exists('${marker}')`)
+    const failure = step.when.includes(`!exists('${marker}')`)
+    assert.ok(gated || failure, flatten(step))
+  }
+  const success = steps.filter((step) => step.method === "notify" && String(step.params.html).includes("Click Start"))
+  assert.equal(success.length, 1)
+  assert.ok(success[0].when.includes(`exists('${marker}')`) && !success[0].when.includes(`!exists('${marker}')`))
+  assert.ok(success[0].when.includes("exists('app/frontend/build')"))
+})
+
+test("install.js creates the env with uv and an explicit Python 3.12 after dropping a wrong one, and never over an existing env", () => {
+  const steps = load("install.js").run
+  const create = steps.findIndex((step) => step.params.message === "uv venv --python 3.12 env")
+  assert.ok(create >= 0)
+  assert.equal(steps[create].params.path, "app")
+  assert.ok(steps[create].when.includes("!exists('app/env/pyvenv.cfg')"))
+  const drop = steps.map((step, index) => (String(step.params.message).includes("shutil.rmtree('env'") ? index : -1)).filter((index) => index >= 0)
+  assert.equal(drop.length, 2)
+  assert.ok(Math.max(...drop) < create)
+  const firstPip = steps.findIndex((step) => String(step.params.message).startsWith("uv pip install"))
+  assert.ok(create < firstPip)
+  assert.ok(!/--clear|--allow-existing|--seed/.test(flatten(steps)))
+  for (const index of drop) {
+    assert.ok(steps[index].params.message.includes("sys.version_info[:2] == (3, 12)"))
+    assert.ok(steps[index].params.message.includes(" || python -c "))
+  }
+})
+
+test("install.js leaves Pinokio's venv handling out of every step so a wrong default Python cannot be picked up", () => {
+  for (const step of load("install.js").run) {
+    assert.ok(!("venv" in step.params) && !("venv_python" in step.params), flatten(step))
+  }
+})
+
+test("install.js skips the pip steps when there is no env, so a failed clone or env creation installs nothing", () => {
+  const pip = load("install.js").run.filter((step) => String(step.params.message).startsWith("uv pip install"))
+  assert.equal(pip.length, 4)
+  for (const step of pip) assert.ok(step.when.includes("exists('app/env/pyvenv.cfg')"), step.when)
+  const clone = simulateInstall({ cloneOk: false })
+  assert.deepEqual(clone.ran, ["clone", "notify"])
+  assert.ok(reportsFailure(clone.notices) && !reportsInstalled(clone.notices))
+  const noPython = simulateInstall({ createVersion: null })
+  assert.deepEqual(noPython.ran, ["clone", "probe", "venv", "notify"])
+  assert.ok(reportsFailure(noPython.notices) && !reportsInstalled(noPython.notices))
+  assert.ok(!noPython.files.has("app/env"))
+})
+
+test("install.js rebuilds a Python 3.10 env with 3.12 and finishes", () => {
+  const existing = ["app", "app/.git", "app/api.py", "app/requirements.txt", "app/env", "app/env/pyvenv.cfg", "app/frontend/build"]
+  for (const platform of ["linux", "win32"]) {
+    const run = simulateInstall({ existing, envVersion: "3.10", platform })
+    assert.deepEqual(run.ran, ["probe", "venv", "pip", "verify", "ffmpeg", "build", "notify"], platform)
+    assert.equal(run.env.version, "3.12")
+    assert.ok(run.files.has(marker) && !reportsFailure(run.notices) && reportsInstalled(run.notices))
+  }
+})
+
+test("install.js keeps a working Python 3.12 env and installs into it", () => {
+  const existing = ["app", "app/.git", "app/api.py", "app/requirements.txt", "app/env", "app/env/pyvenv.cfg"]
+  const run = simulateInstall({ existing })
+  assert.deepEqual(run.ran, ["probe", "pip", "verify", "ffmpeg", "build", "notify"])
+})
+
+test("install.js stops after a failed pip step: no ffmpeg, no frontend build, no success notice", () => {
+  for (const [gpu, platform] of [["nvidia", "linux"], ["nvidia", "win32"], ["none", "linux"], ["none", "win32"]]) {
+    const { ran, notices, files } = simulateInstall({ gpu, platform, pipOk: false })
+    assert.deepEqual(withoutNotices(ran), ["clone", "probe", "venv", "pip", "verify"], `${gpu} ${platform}`)
+    assert.ok(reportsFailure(notices) && !reportsInstalled(notices), `${gpu} ${platform}`)
+    assert.ok(!files.has(marker) && !files.has("app/frontend/build"))
+  }
+})
+
+test("install.js on a repair run with a bare venv and a stale build fails loudly instead of reporting success", () => {
+  const existing = ["app", "app/.git", "app/api.py", "app/requirements.txt", "app/env", "app/env/pyvenv.cfg", "app/frontend/build", marker]
+  const { ran, notices } = simulateInstall({ existing, pipOk: false })
+  assert.deepEqual(withoutNotices(ran), ["probe", "pip", "verify"])
+  assert.ok(reportsFailure(notices) && !reportsInstalled(notices))
+})
+
+test("install.js completes the whole flow when every step works", () => {
+  const nvidia = simulateInstall()
+  assert.deepEqual(nvidia.ran, completeRun)
+  assert.ok(nvidia.notices.some((html) => html.includes("Click Start")) && !reportsFailure(nvidia.notices))
+  const cpu = simulateInstall({ gpu: "none" })
+  assert.deepEqual(cpu.ran, ["notify", ...completeRun])
+  assert.ok(cpu.notices.some((html) => html.includes("CPU-only build")) && !reportsFailure(cpu.notices))
+  assert.deepEqual(simulateInstall({ platform: "win32" }).ran, completeRun)
+})
+
+test("install.js reports a failed frontend build and does not say the install is done", () => {
+  const { ran, notices } = simulateInstall({ buildOk: false })
+  assert.deepEqual(ran, completeRun)
+  assert.equal(notices.length, 1)
+  assert.ok(notices[0].includes("frontend build failed") && !reportsInstalled(notices))
+})
+
+const python = (() => {
+  for (const name of ["python3", "python"]) {
+    const probe = spawnSync(name, ["-c", "import sys; print(sys.version_info[0])"], { encoding: "utf8" })
+    if (probe.status === 0 && probe.stdout.trim() === "3") return name
+  }
+  return null
+})()
+
+const importable = ""
+const missing = (name) => `raise ModuleNotFoundError("No module named '${name}'")\n`
+const healthyModules = { uvicorn: importable, fastapi: importable, torch: importable }
+const envFiles = ["app", "app/api.py", "app/requirements.txt", "app/env", "app/env/pyvenv.cfg"]
+
+const withEnvFixture = ({ stubs = healthyModules, version = [3, 12], hasEnv = true, brokenEnv = false, stale = false }, body) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "potionui-env-"))
+  try {
+    const app = path.join(root, "app")
+    const stubDir = path.join(root, "stubs")
+    fs.mkdirSync(app)
+    fs.mkdirSync(stubDir)
+    if (hasEnv) {
+      const created = spawnSync(python, ["-m", "venv", "--without-pip", path.join(app, "env")], { encoding: "utf8" })
+      assert.equal(created.status, 0, created.stderr)
+      if (brokenEnv) fs.rmSync(path.join(app, "env", process.platform === "win32" ? "Scripts" : "bin"), { recursive: true, force: true })
+    }
+    fs.writeFileSync(path.join(stubDir, "sitecustomize.py"), `import sys\nsys.version_info = (${version[0]}, ${version[1]}, 0, "final", 0)\n`, "utf8")
+    for (const [name, text] of Object.entries(stubs)) fs.writeFileSync(path.join(stubDir, `${name}.py`), text, "utf8")
+    if (stale) fs.writeFileSync(path.join(app, "env", ".deps-verified"), "")
+    const run = (needle) => {
+      const step = load("install.js").run.find((item) => String(item.params.message).includes(needle) && evaluateWhen(item, envFiles, "nvidia", process.platform))
+      const command = step.params.message.replace(" || python -c ", ` || ${python} -c `)
+      const result = spawnSync(command, { shell: true, cwd: app, env: { ...process.env, PYTHONPATH: stubDir }, encoding: "utf8" })
+      return { status: result.status, output: `${result.stdout}${result.stderr}` }
+    }
+    return body({ app, run, markerFile: path.join(app, "env", ".deps-verified"), envDir: path.join(app, "env") })
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+}
+
+test("the verify command writes the marker only when the env is Python 3.12 and uvicorn, fastapi and torch import", { skip: !python }, () => {
+  withEnvFixture({}, ({ run, markerFile }) => {
+    const result = run("import uvicorn")
+    assert.equal(fs.existsSync(markerFile), true, result.output)
+  })
+  for (const absent of ["uvicorn", "fastapi", "torch"]) {
+    withEnvFixture({ stubs: { ...healthyModules, [absent]: missing(absent) } }, ({ run, markerFile }) => {
+      const result = run("import uvicorn")
+      assert.equal(fs.existsSync(markerFile), false, absent)
+      assert.ok(result.output.includes(`No module named '${absent}'`), result.output)
+    })
+  }
+})
+
+test("the verify command refuses a Python 3.10 env even when every package imports", { skip: !python }, () => {
+  withEnvFixture({ version: [3, 10] }, ({ run, markerFile }) => {
+    const result = run("import uvicorn")
+    assert.equal(fs.existsSync(markerFile), false, result.output)
+    assert.ok(result.output.includes("AssertionError"), result.output)
+  })
+})
+
+test("the verify command removes a stale marker when the check fails", { skip: !python }, () => {
+  withEnvFixture({ stubs: { ...healthyModules, uvicorn: missing("uvicorn") }, stale: true }, ({ run, markerFile }) => {
+    run("import uvicorn")
+    assert.equal(fs.existsSync(markerFile), false)
+  })
+  withEnvFixture({ version: [3, 10], stale: true }, ({ run, markerFile }) => {
+    run("import uvicorn")
+    assert.equal(fs.existsSync(markerFile), false)
+  })
+})
+
+test("the env check keeps a Python 3.12 env and removes a 3.10, a broken or a missing one without failing", { skip: !python }, () => {
+  withEnvFixture({}, ({ run, envDir }) => {
+    const result = run("shutil.rmtree")
+    assert.equal(fs.existsSync(envDir), true, result.output)
+  })
+  withEnvFixture({ version: [3, 10] }, ({ run, envDir }) => {
+    const result = run("shutil.rmtree")
+    assert.equal(result.status, 0, result.output)
+    assert.equal(fs.existsSync(envDir), false)
+  })
+  withEnvFixture({ brokenEnv: true }, ({ run, envDir }) => {
+    const result = run("shutil.rmtree")
+    assert.equal(result.status, 0, result.output)
+    assert.equal(fs.existsSync(envDir), false)
+  })
+  withEnvFixture({ hasEnv: false }, ({ run, envDir }) => {
+    const result = run("shutil.rmtree")
+    assert.equal(result.status, 0, result.output)
+    assert.equal(fs.existsSync(envDir), false)
+  })
+})
+
+const git = (cwd, args) => {
+  const result = spawnSync("git", ["-c", "user.name=launcher-test", "-c", "user.email=launcher-test@example.com", ...args], { cwd, encoding: "utf8" })
+  assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`)
+  return result.stdout.trim()
+}
+
+const buildUpdateFixture = () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "potionui-update-"))
+  const origin = path.join(root, "origin")
+  fs.mkdirSync(origin)
+  git(origin, ["init", "-q"])
+  const write = (file, text) => {
+    fs.mkdirSync(path.dirname(path.join(origin, file)), { recursive: true })
+    fs.writeFileSync(path.join(origin, file), text, "utf8")
+  }
+  write(".gitignore", ".env\nenv/\nfrontend/build/\nfrontend/node_modules/\ncontent/presets/local/\n")
+  write("api.py", "app\n")
+  write("requirements.txt", "uvicorn\n")
+  write("frontend/package-lock.json", "lock one\n")
+  git(origin, ["add", "-A"])
+  git(origin, ["commit", "-q", "-m", "one"])
+  git(origin, ["tag", "v0.0.15"])
+  write("frontend/package-lock.json", "lock two\n")
+  write("content/presets/marketplace/new.yml", "new\n")
+  git(origin, ["add", "-A"])
+  git(origin, ["commit", "-q", "-m", "two"])
+  git(origin, ["tag", "v0.0.16"])
+  const target = git(origin, ["rev-parse", "v0.0.16^{commit}"])
+  git(root, ["clone", "-q", "--depth", "1", "--branch", "v0.0.15", pathToFileURL(origin).href, "app"])
+  const app = path.join(root, "app")
+  const mine = {
+    ".env": "SECRET=1\n",
+    "env/bin/uvicorn": "entry\n",
+    "frontend/build/index.html": "built\n",
+    "frontend/node_modules/pkg/index.js": "module\n",
+    "content/presets/local/mine.yml": "mine\n"
+  }
+  for (const [file, text] of Object.entries(mine)) {
+    fs.mkdirSync(path.dirname(path.join(app, file)), { recursive: true })
+    fs.writeFileSync(path.join(app, file), text, "utf8")
+  }
+  fs.writeFileSync(path.join(app, "frontend", "package-lock.json"), "lock one, rewritten by npm install\n", "utf8")
+  return { root, app, target, mine, origin }
+}
+
+const runUpdateGit = (fixture, steps) => {
+  const outcomes = []
+  for (const step of steps) {
+    const result = spawnSync(step.params.message, { shell: true, cwd: path.join(fixture.root, step.params.path), encoding: "utf8" })
+    outcomes.push(result.status)
+  }
+  return outcomes
+}
+
+const updateGitSteps = () => load("update.js").run.filter((step) => step.method === "shell.run")
+
+test("update.js switches to the pinned tag even though npm install rewrote the tracked lock file, and keeps every untracked or ignored file", () => {
+  const fixture = buildUpdateFixture()
+  try {
+    assert.deepEqual(runUpdateGit(fixture, updateGitSteps()), [0, 0, 0])
+    assert.equal(git(fixture.app, ["rev-parse", "HEAD"]), fixture.target)
+    assert.equal(fs.readFileSync(path.join(fixture.app, "frontend", "package-lock.json"), "utf8"), "lock two\n")
+    assert.ok(fs.existsSync(path.join(fixture.app, "content", "presets", "marketplace", "new.yml")))
+    for (const [file, text] of Object.entries(fixture.mine)) {
+      assert.equal(fs.readFileSync(path.join(fixture.app, file), "utf8"), text, file)
+    }
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true })
+  }
+})
+
+test("without the lock file restore the same checkout is refused, which is what update.js guards against", () => {
+  const fixture = buildUpdateFixture()
+  try {
+    const steps = updateGitSteps().filter((step) => !step.params.message.includes("package-lock.json"))
+    const [fetched, checkedOut] = runUpdateGit(fixture, steps)
+    assert.equal(fetched, 0)
+    assert.notEqual(checkedOut, 0)
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true })
+  }
+})
+
+test("update.js restores only the lock file, never forces the checkout and still refuses to overwrite other edits", () => {
+  const messages = updateGitSteps().map((step) => step.params.message)
+  assert.deepEqual(messages, ["git checkout -- frontend/package-lock.json", "git fetch --depth 1 origin tag v0.0.16", "git checkout v0.0.16"])
+  assert.ok(!/(^| )(-f|--force|reset|clean|stash)( |$)/.test(messages.join(" ")))
+  const fixture = buildUpdateFixture()
+  try {
+    fs.writeFileSync(path.join(fixture.app, "api.py"), "edited by the user\n", "utf8")
+    fs.writeFileSync(path.join(fixture.origin, "api.py"), "tag two\n", "utf8")
+    git(fixture.origin, ["commit", "-q", "-am", "api"])
+    git(fixture.origin, ["tag", "-f", "v0.0.16"])
+    const outcomes = runUpdateGit(fixture, updateGitSteps())
+    assert.notEqual(outcomes[2], 0)
+    assert.equal(fs.readFileSync(path.join(fixture.app, "api.py"), "utf8"), "edited by the user\n")
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true })
   }
 })

@@ -1,10 +1,15 @@
+const uvicornEntries = ["app/env/bin/uvicorn", "app/env/Scripts/uvicorn.exe"]
+
 module.exports = {
   version: "7.0",
   title: "PotionUI",
   description: "PotionUI 0.0.16: self-hosted AI image and video generation with a preset-driven interface, a native diffusers engine and ComfyUI support. Requires Windows or Linux with an NVIDIA GPU (driver 580 or newer, 8 GB VRAM and 16 GB RAM minimum). Other machines get a remote-only install.",
   icon: "icon.png",
   menu: async (kernel, info) => {
-    const installed = info.exists("app/env") && info.exists("app/frontend/build")
+    const hasEnv = info.exists("app/env")
+    const hasBuild = info.exists("app/frontend/build")
+    const hasServer = uvicornEntries.some((entry) => info.exists(entry))
+    const installed = hasEnv && hasBuild && hasServer
     const running = {
       install: info.running("install.js"),
       start: info.running("start.js"),
@@ -21,7 +26,8 @@ module.exports = {
       return [{ default: true, icon: "fa-solid fa-terminal", text: "Resetting", href: "reset.js" }]
     }
     if (!installed) {
-      return [{ default: true, icon: "fa-solid fa-plug", text: "Install", href: "install.js" }]
+      const text = hasEnv || hasBuild ? "Repair install" : "Install"
+      return [{ default: true, icon: "fa-solid fa-plug", text, href: "install.js" }]
     }
     if (running.start) {
       const local = info.local("start.js")

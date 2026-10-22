@@ -4,6 +4,13 @@ module.exports = {
       method: "shell.run",
       params: {
         path: "app",
+        message: "git checkout -- frontend/package-lock.json"
+      }
+    },
+    {
+      method: "shell.run",
+      params: {
+        path: "app",
         message: "git fetch --depth 1 origin tag v0.0.16"
       }
     },
