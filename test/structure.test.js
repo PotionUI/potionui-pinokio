@@ -101,7 +101,7 @@ test("start.js takes its port from kernel.port, not a constant", async () => {
 test("update.js never deletes anything and reruns install", () => {
   const update = load("update.js")
   assert.ok(!update.run.some((step) => step.method.startsWith("fs.")))
-  assert.ok(update.run.some((step) => step.params.message === "git checkout v0.0.17" && step.params.path === "app"))
+  assert.ok(update.run.some((step) => step.params.message === "git checkout -B master FETCH_HEAD" && step.params.path === "app"))
   assert.ok(update.run.some((step) => step.method === "script.start" && step.params.uri === "install.js"))
 })
 
@@ -192,7 +192,7 @@ test("install.js leaves a complete app alone", () => {
 test("install.js clones shallow into app and builds the frontend", () => {
   const steps = load("install.js").run
   const clone = steps.find((step) => flatten(step.params).includes("git clone"))
-  assert.equal(clone.params.message, "git clone --depth 1 --branch v0.0.17 https://github.com/PotionUI/PotionUI.git app")
+  assert.equal(clone.params.message, "git clone --depth 1 --branch master https://github.com/PotionUI/PotionUI.git app")
   const build = steps.find((step) => step.params && step.params.path === "app/frontend")
   assert.equal(build.params.message, "node ../../build-frontend.js")
   assert.ok(fs.existsSync(path.join(root, "build-frontend.js")))
@@ -435,22 +435,19 @@ test("icon.png is 512x512 with opaque corners", () => {
   }
 })
 
-const APP_VERSION = "0.0.17"
-
-test("the app version is pinned to one tag across install, update, metadata and README", () => {
-  const tag = `v${APP_VERSION}`
+test("install and update follow master and the descriptions carry no pinned version", () => {
   const clone = load("install.js").run.find((step) => flatten(step.params).includes("git clone"))
-  assert.ok(clone.params.message.includes(`--branch ${tag} `))
+  assert.ok(clone.params.message.includes("--branch master "))
   const messages = load("update.js").run.map((step) => step.params.message)
-  assert.ok(messages.includes(`git fetch --depth 1 origin tag ${tag}`))
-  assert.ok(messages.includes(`git checkout ${tag}`))
+  assert.ok(messages.includes("git fetch --depth 1 origin master"))
+  assert.ok(messages.includes("git checkout -B master FETCH_HEAD"))
   assert.ok(!messages.includes("git pull"))
   const json = JSON.parse(fs.readFileSync(path.join(root, "pinokio.json"), "utf8"))
   assert.equal(load("pinokio.js").version, "7.0")
   for (const description of [load("pinokio.js").description, json.description]) {
-    assert.ok(description.startsWith(`PotionUI ${APP_VERSION}:`))
+    assert.ok(description.startsWith("PotionUI: "))
   }
-  assert.ok(fs.readFileSync(path.join(root, "README.md"), "utf8").includes(`PotionUI ${APP_VERSION}`))
+  assert.ok(!/v?0\.0\.\d+/.test(fs.readFileSync(path.join(root, "README.md"), "utf8").split("## ")[0]))
 })
 
 test("requirements are stated in both descriptions and the README", () => {
@@ -524,8 +521,6 @@ const simulateInstall = ({ gpu = "nvidia", platform = "linux", existing = [], en
       ran.push("verify")
       files.delete(marker)
       if (env && env.version === "3.12" && files.has(entry)) files.add(marker)
-    } else if (message.includes("conda install")) {
-      ran.push("ffmpeg")
     } else if (step.params.path === "app/frontend") {
       ran.push("build")
       if (buildOk) files.add("app/frontend/build")
@@ -538,28 +533,27 @@ const simulateInstall = ({ gpu = "nvidia", platform = "linux", existing = [], en
 
 const reportsInstalled = (notices) => notices.some((html) => html.includes("Click Start") || html.includes("CPU-only build"))
 const reportsFailure = (notices) => notices.some((html) => html.includes("click Install again"))
-const completeRun = ["clone", "probe", "venv", "pip", "verify", "ffmpeg", "build", "notify"]
+const completeRun = ["clone", "probe", "venv", "pip", "verify", "build", "notify"]
 const withoutNotices = (ran) => ran.filter((name) => name !== "notify")
 
-test("install.js verifies the env right after the pip step and before ffmpeg and the frontend build", () => {
+test("install.js verifies the env right after the pip step and before the frontend build", () => {
   const steps = load("install.js").run
   const pip = steps.map((step, index) => (String(step.params.message).startsWith("uv pip install") ? index : -1)).filter((index) => index >= 0)
   const verify = steps.map((step, index) => (String(step.params.message).includes("import uvicorn, fastapi, torch") ? index : -1)).filter((index) => index >= 0)
-  const ffmpeg = steps.findIndex((step) => String(step.params.message).includes("conda install"))
   const build = steps.findIndex((step) => step.params && step.params.path === "app/frontend")
   assert.equal(verify.length, 2)
   assert.ok(Math.min(...verify) > Math.max(...pip))
-  assert.ok(Math.max(...verify) < ffmpeg && ffmpeg < build)
+  assert.ok(Math.max(...verify) < build)
   for (const index of verify) {
     assert.equal(steps[index].params.path, "app")
     assert.ok(steps[index].params.message.includes("sys.version_info[:2] == (3, 12)"))
   }
 })
 
-test("install.js runs ffmpeg, the frontend build and the success notices only when the env verified", () => {
+test("install.js runs the frontend build and the success notices only when the env verified", () => {
   const steps = load("install.js").run
-  const ffmpeg = steps.findIndex((step) => String(step.params.message).includes("conda install"))
-  for (const step of steps.slice(ffmpeg)) {
+  const build = steps.findIndex((step) => step.params && step.params.path === "app/frontend")
+  for (const step of steps.slice(build)) {
     const gated = step.when.includes(`exists('${marker}')`)
     const failure = step.when.includes(`!exists('${marker}')`)
     assert.ok(gated || failure, flatten(step))
@@ -611,7 +605,7 @@ test("install.js rebuilds a Python 3.10 env with 3.12 and finishes", () => {
   const existing = ["app", "app/.git", "app/api.py", "app/requirements.txt", "app/env", "app/env/pyvenv.cfg", "app/frontend/build"]
   for (const platform of ["linux", "win32"]) {
     const run = simulateInstall({ existing, envVersion: "3.10", platform })
-    assert.deepEqual(run.ran, ["probe", "venv", "pip", "verify", "ffmpeg", "build", "notify"], platform)
+    assert.deepEqual(run.ran, ["probe", "venv", "pip", "verify", "build", "notify"], platform)
     assert.equal(run.env.version, "3.12")
     assert.ok(run.files.has(marker) && !reportsFailure(run.notices) && reportsInstalled(run.notices))
   }
@@ -620,10 +614,10 @@ test("install.js rebuilds a Python 3.10 env with 3.12 and finishes", () => {
 test("install.js keeps a working Python 3.12 env and installs into it", () => {
   const existing = ["app", "app/.git", "app/api.py", "app/requirements.txt", "app/env", "app/env/pyvenv.cfg"]
   const run = simulateInstall({ existing })
-  assert.deepEqual(run.ran, ["probe", "pip", "verify", "ffmpeg", "build", "notify"])
+  assert.deepEqual(run.ran, ["probe", "pip", "verify", "build", "notify"])
 })
 
-test("install.js stops after a failed pip step: no ffmpeg, no frontend build, no success notice", () => {
+test("install.js stops after a failed pip step: no frontend build, no success notice", () => {
   for (const [gpu, platform] of [["nvidia", "linux"], ["nvidia", "win32"], ["none", "linux"], ["none", "win32"]]) {
     const { ran, notices, files } = simulateInstall({ gpu, platform, pipOk: false })
     assert.deepEqual(withoutNotices(ran), ["clone", "probe", "venv", "pip", "verify"], `${gpu} ${platform}`)
@@ -761,7 +755,7 @@ const buildUpdateFixture = () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "potionui-update-"))
   const origin = path.join(root, "origin")
   fs.mkdirSync(origin)
-  git(origin, ["init", "-q"])
+  git(origin, ["init", "-q", "-b", "master"])
   const write = (file, text) => {
     fs.mkdirSync(path.dirname(path.join(origin, file)), { recursive: true })
     fs.writeFileSync(path.join(origin, file), text, "utf8")
@@ -777,8 +771,7 @@ const buildUpdateFixture = () => {
   write("content/presets/marketplace/new.yml", "new\n")
   git(origin, ["add", "-A"])
   git(origin, ["commit", "-q", "-m", "two"])
-  git(origin, ["tag", "v0.0.17"])
-  const target = git(origin, ["rev-parse", "v0.0.17^{commit}"])
+  const target = git(origin, ["rev-parse", "HEAD"])
   git(root, ["clone", "-q", "--depth", "1", "--branch", "v0.0.15", pathToFileURL(origin).href, "app"])
   const app = path.join(root, "app")
   const mine = {
@@ -807,7 +800,7 @@ const runUpdateGit = (fixture, steps) => {
 
 const updateGitSteps = () => load("update.js").run.filter((step) => step.method === "shell.run")
 
-test("update.js switches to the pinned tag even though npm install rewrote the tracked lock file, and keeps every untracked or ignored file", () => {
+test("update.js moves a shallow tag checkout to master even though npm install rewrote the tracked lock file, and keeps every untracked or ignored file", () => {
   const fixture = buildUpdateFixture()
   try {
     assert.deepEqual(runUpdateGit(fixture, updateGitSteps()), [0, 0, 0])
@@ -836,14 +829,13 @@ test("without the lock file restore the same checkout is refused, which is what 
 
 test("update.js restores only the lock file, never forces the checkout and still refuses to overwrite other edits", () => {
   const messages = updateGitSteps().map((step) => step.params.message)
-  assert.deepEqual(messages, ["git checkout -- frontend/package-lock.json", "git fetch --depth 1 origin tag v0.0.17", "git checkout v0.0.17"])
+  assert.deepEqual(messages, ["git checkout -- frontend/package-lock.json", "git fetch --depth 1 origin master", "git checkout -B master FETCH_HEAD"])
   assert.ok(!/(^| )(-f|--force|reset|clean|stash)( |$)/.test(messages.join(" ")))
   const fixture = buildUpdateFixture()
   try {
     fs.writeFileSync(path.join(fixture.app, "api.py"), "edited by the user\n", "utf8")
     fs.writeFileSync(path.join(fixture.origin, "api.py"), "tag two\n", "utf8")
     git(fixture.origin, ["commit", "-q", "-am", "api"])
-    git(fixture.origin, ["tag", "-f", "v0.0.17"])
     const outcomes = runUpdateGit(fixture, updateGitSteps())
     assert.notEqual(outcomes[2], 0)
     assert.equal(fs.readFileSync(path.join(fixture.app, "api.py"), "utf8"), "edited by the user\n")

@@ -28,7 +28,7 @@ module.exports = {
       when: "{{!(exists('app/api.py') && exists('app/requirements.txt'))}}",
       method: "shell.run",
       params: {
-        message: "git clone --depth 1 --branch v0.0.17 https://github.com/PotionUI/PotionUI.git app"
+        message: "git clone --depth 1 --branch master https://github.com/PotionUI/PotionUI.git app"
       }
     },
     {
@@ -101,13 +101,6 @@ module.exports = {
       params: {
         path: "app",
         message: verifyEnv(windowsPython)
-      }
-    },
-    {
-      when: "{{exists('app/env/.deps-verified')}}",
-      method: "shell.run",
-      params: {
-        message: "conda install -y -c conda-forge ffmpeg"
       }
     },
     {

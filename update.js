@@ -11,14 +11,14 @@ module.exports = {
       method: "shell.run",
       params: {
         path: "app",
-        message: "git fetch --depth 1 origin tag v0.0.17"
+        message: "git fetch --depth 1 origin master"
       }
     },
     {
       method: "shell.run",
       params: {
         path: "app",
-        message: "git checkout v0.0.17"
+        message: "git checkout -B master FETCH_HEAD"
       }
     },
     {

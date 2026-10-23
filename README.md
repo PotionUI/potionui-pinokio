@@ -4,7 +4,7 @@ A [Pinokio](https://pinokio.computer) launcher for [PotionUI](https://github.com
 
 ## Requirements
 
-This launcher installs PotionUI 0.0.17.
+This launcher installs PotionUI from its `master` branch.
 
 - Windows or Linux with an NVIDIA GPU. PotionUI's tested matrix is Linux x86_64 with NVIDIA; native Windows is experimental.
 - NVIDIA driver 580 or newer (the CUDA 13 build). Turing or newer cards only (RTX 20xx / GTX 16xx and up); GTX 10-series and older cannot run it.
@@ -17,10 +17,10 @@ This launcher installs PotionUI 0.0.17.
 
 | Menu item | Script | Effect |
 | --- | --- | --- |
-| Install | `install.js` | Clones PotionUI v0.0.17 into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env` with `uv` (replacing one built with another Python), installs the backend into it with `uv`, checks that the env is Python 3.12 and that `uvicorn`, `fastapi` and `torch` import, installs ffmpeg through conda and builds the frontend with `build-frontend.js`. When the clone, the env or the package install fails it stops there and says so |
+| Install | `install.js` | Clones PotionUI `master` into `app/` (skipped when `app/.git` exists), creates a Python 3.12 venv in `app/env` with `uv` (replacing one built with another Python), installs the backend into it with `uv`, checks that the env is Python 3.12 and that `uvicorn`, `fastapi` and `torch` import, and builds the frontend with `build-frontend.js`. When the clone, the env or the package install fails it stops there and says so |
 | Start | `start.js` | Takes a free port from `kernel.port()`, stores `http://127.0.0.1:<port>` as the `url` local variable, then runs PotionUI's backend with uvicorn on that port. The backend serves the built UI itself, so there is one process |
 | Open Web UI / Terminal | | Shown while running. The URL is set before launch, as in Pinokio's `open-webui` example, so it does not depend on matching the console output. It can appear a few seconds before the app finishes starting. |
-| Update | `update.js` | Discards the `frontend/package-lock.json` change that `npm install` leaves behind, fetches and checks out the v0.0.17 tag in `app/`, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
+| Update | `update.js` | Discards the `frontend/package-lock.json` change that `npm install` leaves behind, fetches `master` and moves the checkout in `app/` to it, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
 | Reset | `reset.js` | Deletes `app/env`, `app/frontend/node_modules` and `app/frontend/build` |
 
 ### Install strategy
@@ -34,9 +34,9 @@ This launcher installs PotionUI 0.0.17.
 - The port is not fixed. The frontend derives its API and WebSocket addresses from `window.location`, and nothing in PotionUI's backend or frontend source refers to port 26730 when the backend serves the built frontend.
 - Windows with NVIDIA adds PyTorch's `cu130` index, as PotionUI's own installer does.
 - No NVIDIA GPU (AMD, Apple, CPU): a warning notification appears before anything is cloned or installed, then `requirements-cpu.txt` (PotionUI's "remote" profile) is installed. Local generation is unavailable there. Use a remote worker or cloud backends.
-- The app version is pinned. `install.js` clones `--branch v0.0.17` and `update.js` checks out the same tag, so the installed app is exactly the version the launcher shows. A new PotionUI release reaches users when this launcher changes the tag in `install.js`, `update.js`, the descriptions and the README.
+- The app follows `master`. `install.js` clones `--branch master` and `update.js` runs `git fetch --depth 1 origin master` then `git checkout -B master FETCH_HEAD`, which also moves an older install that sits on a detached tag checkout onto `master`. The checkout is not forced, so local edits to tracked files stop it instead of being overwritten; untracked and ignored files are kept.
 - NVIDIA driver 580 or newer is required for the CUDA 13 build.
-- Pinokio keeps running a script after a shell command fails, so `install.js` cannot rely on a failed `uv pip install` stopping it. Instead the verification step deletes `app/env/.deps-verified` and recreates it only when the env's interpreter is Python 3.12 and `uvicorn`, `fastapi` and `torch` import in it. The ffmpeg install, the frontend build and the success notification run only when that file exists; otherwise a notification explains that the install did not finish. The pip steps run only when `app/env/pyvenv.cfg` exists, so a failed clone or a failed env creation installs nothing.
+- Pinokio keeps running a script after a shell command fails, so `install.js` cannot rely on a failed `uv pip install` stopping it. Instead the verification step deletes `app/env/.deps-verified` and recreates it only when the env's interpreter is Python 3.12 and `uvicorn`, `fastapi` and `torch` import in it. The frontend build and the success notification run only when that file exists; otherwise a notification explains that the install did not finish. The pip steps run only when `app/env/pyvenv.cfg` exists, so a failed clone or a failed env creation installs nothing.
 - The menu offers Start only when `app/env`, `app/frontend/build` and the venv's `uvicorn` entry point all exist (`app/env/bin/uvicorn`, or `app/env/Scripts/uvicorn.exe` on Windows). A venv without it shows Repair install (or Install when nothing exists) instead of Start. The entry point is checked rather than the `.deps-verified` file so installs made before that file existed still show Start.
 - `build-frontend.js` runs `npm install` and `npm run build` from the frontend folder's real path. Pinokio can start the shell in a spelling with a lowercase drive letter (`g:\pinokio\…`), and the Vite build then resolves `$lib` under `g:` while the files resolve under `G:`, so Rollup fails with a relative path that escapes the drive root.
 - Update only discards `frontend/package-lock.json` (tracked, and rewritten by `npm install`). Everything else PotionUI ignores stays untouched: `.env`, `content/*/local`, `frontend/build`, `frontend/node_modules` and `env/` are all in PotionUI's `.gitignore`, and `data/` lives outside `app/`. The checkout is not forced, so an edit to any other tracked file makes git refuse and report it in the terminal instead of being overwritten.
@@ -101,17 +101,16 @@ The launcher must be a real folder under `PINOKIO_HOME/api`, not a symlink. Pino
 node --test test/structure.test.js
 ```
 
-The tests check script structure, the start port and url wiring, and menu states against a mock `info` for the Linux and Windows venv layouts, assert that `when` expressions use only documented template helpers, and assert that update and reset never delete `data/`. They also walk `install.js` with a simulated file system to prove a failed clone, env creation or pip step skips ffmpeg, the frontend build and the success notice and that a Python 3.10 env is rebuilt with 3.12, run the real env check and verification commands against a real venv with stub modules, and run the update commands in a throwaway git repository to prove the lock file restore and that ignored files survive.
+The tests check script structure, the start port and url wiring, and menu states against a mock `info` for the Linux and Windows venv layouts, assert that `when` expressions use only documented template helpers, and assert that update and reset never delete `data/`. They also walk `install.js` with a simulated file system to prove a failed clone, env creation or pip step skips the frontend build and the success notice and that a Python 3.10 env is rebuilt with 3.12, run the real env check and verification commands against a real venv with stub modules, and run the update commands in a throwaway git repository to prove the lock file restore and that ignored files survive.
 
 ## What the maintainer must check in real Pinokio
 
 1. Click Reset, then Install. Confirm `app/` is cloned, `app/env` is Python 3.12 and `app/frontend/build` exists.
 2. Confirm the `unsafe-best-match` torch install picks the CUDA build on Windows and the CPU build on non-NVIDIA machines.
-3. Confirm `conda install ffmpeg` works in Pinokio's base environment.
-4. Start: the menu changes to "Open Web UI" and the URL opens the app. Stop and start again.
-5. `data/storage/db.sqlite` exists after the first start.
-6. Update after a change to `requirements.txt` or `frontend/` still starts.
-7. Reset, then Install again: the same account and models are still there.
+3. Start: the menu changes to "Open Web UI" and the URL opens the app. Stop and start again.
+4. `data/storage/db.sqlite` exists after the first start.
+5. Update after a change to `requirements.txt` or `frontend/` still starts.
+6. Reset, then Install again: the same account and models are still there.
 8. On a machine without NVIDIA, confirm the CPU install completes (macOS and AMD are untested).
 9. With `app/env` built by another Python (or with `env/bin/python` deleted), click Install: it deletes the env, creates a new one with Python 3.12 and everything verifies.
 10. Run `uv pip uninstall uvicorn` in `app/env`, reopen the launcher: the menu shows Repair install, not Start. Click it, and Start works again.
