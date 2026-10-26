@@ -13,7 +13,7 @@ const scriptOf = async (name) => {
   const loaded = load(name)
   return typeof loaded === "function" ? loaded({ port: async () => PORT }) : loaded
 }
-const scripts = ["install.js", "start.js", "update.js", "reset.js"]
+const scripts = ["install.js", "start.js", "update.js", "reset.js", "reset-password.js"]
 
 const parseEvent = (source) => {
   const match = source.match(/^\/(.*)\/([a-z]*)$/)
@@ -301,28 +301,60 @@ test("menu offers Install when nothing is installed", async () => {
   assert.strictEqual(menu[0].default, true)
 })
 
-test("menu offers Start, Update, Install and Reset when installed and idle", async () => {
+test("menu offers Start, Update, Install, Reset a password and Reset when installed and idle", async () => {
   const menu = await menuFor({ existing: installed })
-  assert.deepEqual(texts(menu), ["Start", "Update", "Install", "Reset"])
+  assert.deepEqual(texts(menu), ["Start", "Update", "Install", "Reset a password", "Reset"])
   assert.equal(menu[0].href, "start.js")
   assert.strictEqual(menu[0].default, true)
 })
 
-test("menu shows Open Web UI and Terminal while running", async () => {
+test("menu shows Open Web UI, Terminal and Reset a password while running", async () => {
   const menu = await menuFor({ existing: installed, runningScripts: ["start.js"], url: "http://127.0.0.1:41234" })
-  assert.deepEqual(texts(menu), ["Open Web UI", "Terminal"])
+  assert.deepEqual(texts(menu), ["Open Web UI", "Terminal", "Reset a password"])
   assert.equal(menu[0].href, "http://127.0.0.1:41234")
 })
 
 test("menu shows progress while installing and before the URL is known", async () => {
   assert.deepEqual(texts(await menuFor({ runningScripts: ["install.js"] })), ["Installing"])
-  assert.deepEqual(texts(await menuFor({ existing: installed, runningScripts: ["start.js"] })), ["Terminal"])
+  assert.deepEqual(texts(await menuFor({ existing: installed, runningScripts: ["start.js"] })), ["Terminal", "Reset a password"])
+  assert.deepEqual(texts(await menuFor({ existing: installed, runningScripts: ["reset-password.js"] })), ["Resetting password"])
+})
+
+test("menu offers Reset a password only once PotionUI is installed", async () => {
+  assert.ok(!texts(await menuFor()).includes("Reset a password"))
+  assert.ok(!texts(await menuFor({ existing: installedOn("linux").slice(0, 2) })).includes("Reset a password"))
+})
+
+test("reset-password.js asks for the username and the new password twice, hiding both passwords", async () => {
+  const [ask] = (await scriptOf("reset-password.js")).run
+  assert.equal(ask.method, "input")
+  const fields = Object.fromEntries(ask.params.form.map((field) => [field.key, field]))
+  assert.deepEqual(Object.keys(fields), ["username", "password", "repeat"])
+  assert.notEqual(fields.username.type, "password")
+  assert.equal(fields.password.type, "password")
+  assert.equal(fields.repeat.type, "password")
+})
+
+test("reset-password.js runs the reset script on the install's database and passes the answers only through the environment", async () => {
+  const [, run] = (await scriptOf("reset-password.js")).run
+  assert.equal(run.method, "shell.run")
+  assert.equal(run.params.venv, "env")
+  assert.equal(run.params.path, "app")
+  assert.equal(run.params.message, "python scripts/reset_password.py")
+  const env = run.params.env
+  const startEnv = (await launchStep()).params.env
+  for (const key of ["POTIONUI_STORAGE_PATH", "POTIONUI_DB_PATH", "POTIONUI_MODELS_DIR"]) {
+    assert.equal(env[key], startEnv[key], key)
+  }
+  assert.equal(env.POTIONUI_RESET_USERNAME, "{{input.username || ''}}")
+  assert.equal(env.POTIONUI_NEW_PASSWORD, "{{input.password || ''}}")
+  assert.equal(env.POTIONUI_NEW_PASSWORD_REPEAT, "{{input.repeat || ''}}")
 })
 
 for (const platform of ["linux", "win32"]) {
   test(`menu offers Start when the ${platform} venv has its uvicorn entry point`, async () => {
     const menu = await menuFor({ existing: installedOn(platform) })
-    assert.deepEqual(texts(menu), ["Start", "Update", "Install", "Reset"])
+    assert.deepEqual(texts(menu), ["Start", "Update", "Install", "Reset a password", "Reset"])
   })
 
   test(`menu offers Repair install, never Start, when the ${platform} venv and build exist without uvicorn`, async () => {

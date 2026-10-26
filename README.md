@@ -21,6 +21,7 @@ This launcher installs PotionUI from its `master` branch.
 | Start | `start.js` | Takes a free port from `kernel.port()`, stores `http://127.0.0.1:<port>` as the `url` local variable, then runs PotionUI's backend with uvicorn on that port. The backend serves the built UI itself, so there is one process |
 | Open Web UI / Terminal | | Shown while running. The URL is set before launch, as in Pinokio's `open-webui` example, so it does not depend on matching the console output. It can appear a few seconds before the app finishes starting. |
 | Update | `update.js` | Discards the `frontend/package-lock.json` change that `npm install` leaves behind, fetches `master` and moves the checkout in `app/` to it, then reruns `install.js` (dependency install and frontend rebuild are idempotent) |
+| Reset a password | `reset-password.js` | Shown once PotionUI is installed, running or not. Asks for a username and a new password twice, then runs `app/scripts/reset_password.py` on `data/storage/db.sqlite`. An empty username resets the owner account, and the terminal shows which username to sign in with. The answers reach the script only through environment variables, never the command line. Anyone who can open this launcher can already read `data/`, so access to the computer is the proof |
 | Reset | `reset.js` | Deletes `app/env`, `app/frontend/node_modules` and `app/frontend/build` |
 
 ### Install strategy
@@ -114,3 +115,4 @@ The tests check script structure, the start port and url wiring, and menu states
 8. On a machine without NVIDIA, confirm the CPU install completes (macOS and AMD are untested).
 9. With `app/env` built by another Python (or with `env/bin/python` deleted), click Install: it deletes the env, creates a new one with Python 3.12 and everything verifies.
 10. Run `uv pip uninstall uvicorn` in `app/env`, reopen the launcher: the menu shows Repair install, not Start. Click it, and Start works again.
+11. Reset a password with an empty username: the terminal prints "Sign in as: <owner>" and the new password works on the login screen. Repeat it with a mismatched second password: nothing changes and the terminal says the passwords do not match.
